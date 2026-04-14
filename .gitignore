@@ -1,0 +1,6 @@
+/.qodo
+/.venv
+/.vscode
+/logs
+/outputs
+/output_parquet

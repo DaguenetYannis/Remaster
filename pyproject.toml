@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eora26-research"
+version = "0.1.0"
+description = "Python-only research repository for multi-year Eora26 analysis."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Remaster project" }
+]
+dependencies = [
+  "duckdb>=1.5",
+  "marimo>=0.23",
+  "matplotlib>=3.10",
+  "networkx>=3.6",
+  "numpy>=2.4",
+  "pandas>=3.0",
+  "polars>=1.39",
+  "pyarrow>=23.0",
+  "pydantic>=2.13",
+  "PyYAML>=6.0",
+  "seaborn>=0.13",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=9.0",
+]
+
+[tool.setuptools]
+packages = ["src", "src.io"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
