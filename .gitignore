@@ -1,6 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+/.venv/
+
+# Research data and generated artifacts
+/data/
+/logs/
+/outputs/
+/output_parquet/
+/tmp/
+
+# Papers and local reference documents
+*.pdf
+
+# Notebooks and exploratory EDA work
+/notebooks/
+/src/EDA/
+/src/EDA.py
+**/__marimo__/
+*.ipynb
+
+# Local editor/tool state
 /.qodo
-/.venv
 /.vscode
-/logs
-/outputs
-/output_parquet
+
+# OS
+.DS_Store
+Thumbs.db

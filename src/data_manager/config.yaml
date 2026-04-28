@@ -1,0 +1,6 @@
+credentials:
+  email: "yannis.daguenet@dauphine.eu"
+  password: "A_:TVMzE2e7eqqS"
+
+paths:
+  raw_dir: "data/raw"
