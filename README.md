@@ -21,14 +21,21 @@ The core analytical idea is that green-ness is not only a property of an isolate
 ```text
 Remaster/
 |-- data/
-|   |-- raw/                 # Original Eora files and archived source zips
-|   |-- parquet/             # Labelled Eora matrices converted to parquet
-|   |-- atlas/               # Atlas raw, concordance, and processed panels
-|   |-- eora/                # Processed Eora metrics
-|   |-- final/               # Final merged analysis tables
-|   |-- data_schema.json     # Inspected Eora matrix shapes and label examples
-|   |-- workflow_schema.json # Explicit EDA workflow contract
-|   `-- eda_config.json      # EDA runtime years and mode
+|   |-- raw/                  # Original Eora yearly folders and archived zips
+|   |-- parquet/              # Labelled Eora matrices converted to parquet
+|   |-- metrics/              # Yearly EI, ET, green-ness, centrality, efficiency outputs
+|   |-- indices/              # Eora index and label reference files
+|   |-- atlas/
+|   |   |-- raw/              # Atlas raw metadata and product-year downloads
+|   |   |-- concordance/      # HS92 to Eora26 mapping files
+|   |   `-- processed/        # Clean Atlas panels and sector-level capability tables
+|   |-- data_schema.json      # Inspected Eora matrix shapes and label examples
+|   |-- data_tree.json        # Local data inventory
+|   |-- eda_config.json       # EDA runtime years and mode
+|   |-- metrics_schema.json   # Metric output schema notes
+|   |-- workflow_schema.json  # Explicit EDA workflow contract
+|   |-- remaster_notes.txt    # Project notes used by the EDA run report
+|   `-- thesis_notes.txt      # Thesis notes used by the EDA run report
 |-- notebooks/               # marimo notebooks only
 |-- outputs/                 # Figures, tables, notes, and audit reports
 |-- src/
@@ -120,13 +127,20 @@ outputs/eda/
 - `build_concordance_prefill.py` pre-fills HS92 to Eora26 sector mappings.
 - `aggregate_atlas_to_eora_sector.py` aggregates product capabilities to Eora26 sectors.
 
-Then `src/modelling/merge_eora_atlas.py` merges processed Eora metrics with Atlas sector capabilities:
+Then `src/modelling/merge_eora_atlas.py` merges processed Eora metrics with Atlas sector capabilities. This script is configured to read:
+
+```text
+data/eora/processed/eora_metrics.parquet
+data/atlas/processed/atlas_eora26_sector_capabilities_1995_2016.parquet
+```
+
+and to create the final output directory when it writes:
 
 ```powershell
 python -m src.modelling.merge_eora_atlas
 ```
 
-Expected output:
+Configured output:
 
 ```text
 data/final/eora_atlas_merged.parquet
