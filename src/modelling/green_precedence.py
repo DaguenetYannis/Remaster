@@ -60,9 +60,11 @@ class GreenPrecedenceBuilder:
     def _add_green_event(self, df: pd.DataFrame) -> pd.DataFrame:
         out = df.copy()
 
+        if self.config.green_event_mode in {"ei", "combined"}:
+            out = self._ensure_strict_green_upgrade(out)
+
         if self.config.green_event_mode == "ei":
-            self._check_columns(out, ["delta_ei"])
-            out["green_upgrade_event"] = out["delta_ei"] < 0
+            out["green_upgrade_event"] = out["strict_green_upgrade"] == 1
 
         elif self.config.green_event_mode == "network":
             self._check_columns(out, ["delta_network_green"])
@@ -75,8 +77,7 @@ class GreenPrecedenceBuilder:
         elif self.config.green_event_mode == "combined":
             conditions = []
 
-            if "delta_ei" in out.columns:
-                conditions.append(out["delta_ei"] < 0)
+            conditions.append(out["strict_green_upgrade"] == 1)
 
             if "delta_network_green" in out.columns:
                 conditions.append(out["delta_network_green"] > 0)
@@ -105,6 +106,36 @@ class GreenPrecedenceBuilder:
 
         return out
 
+    def _ensure_strict_green_upgrade(self, df: pd.DataFrame) -> pd.DataFrame:
+        out = df.copy()
+
+        if "strict_green_upgrade" in out.columns:
+            out["strict_green_upgrade"] = (
+                pd.to_numeric(out["strict_green_upgrade"], errors="coerce")
+                .fillna(0)
+                .astype(int)
+            )
+            logging.info("Using existing strict_green_upgrade event signal.")
+            return out
+
+        self._check_columns(out, ["delta_ei"])
+
+        delta_ei = pd.to_numeric(out["delta_ei"], errors="coerce")
+        threshold = delta_ei.quantile(0.25)
+
+        if pd.isna(threshold):
+            logging.warning(
+                "Could not compute delta_ei 25th percentile. "
+                "Filling strict_green_upgrade with 0."
+            )
+            out["strict_green_upgrade"] = 0
+            return out
+
+        out["strict_green_upgrade"] = (delta_ei < threshold).astype(int)
+        logging.info("Computed strict green upgrade delta_ei threshold: %.6g", threshold)
+
+        return out
+
     def _build_upstream_sector_exposure(self, transitions: pd.DataFrame) -> pd.DataFrame:
         rows: list[pd.DataFrame] = []
 
@@ -128,6 +159,13 @@ class GreenPrecedenceBuilder:
             logging.info("Building upstream sector exposure for %s", year)
 
             et = pd.read_parquet(et_path)
+
+            et.index = [self._normalize_node_id(idx) for idx in et.index]
+            et.columns = [self._normalize_node_id(col) for col in et.columns]
+
+            et = et.groupby(level=0).sum()
+            et = et.T.groupby(level=0).sum().T
+            
             year_events = transition_keys[
                 transition_keys[self.config.year_col] == year
             ].copy()
@@ -275,11 +313,26 @@ class GreenPrecedenceBuilder:
         logging.info("Saved node-year scores: %s", node_year_path)
 
     @staticmethod
+    def _extract_country_from_node(node: object) -> str:
+        parts = [p.strip() for p in str(node).split(" | ")]
+        if len(parts) >= 1:
+            return parts[0]
+        return str(node).strip()
+
+
+    @staticmethod
     def _extract_sector_from_node(node: object) -> str:
-        text = str(node)
-        if " | " in text:
-            return text.split(" | ")[-1].strip()
-        return text.strip()
+        parts = [p.strip() for p in str(node).split(" | ")]
+        if len(parts) >= 4:
+            return parts[-1]
+        if len(parts) >= 2:
+            return parts[-1]
+        return str(node).strip()
+
+
+    @classmethod
+    def _normalize_node_id(cls, node: object) -> str:
+        return f"{cls._extract_country_from_node(node)} | {cls._extract_sector_from_node(node)}"
 
     @staticmethod
     def _minmax_signed(series: pd.Series) -> pd.Series:

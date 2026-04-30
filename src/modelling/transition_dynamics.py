@@ -401,6 +401,8 @@ class TransitionDynamicsBuilder:
         if "pagerank" in transitions.columns:
             self._add_delta(transitions, "pagerank", "delta_pagerank")
 
+        self._add_strict_green_upgrade(transitions)
+
         transitions["transition_equation_rhs_unestimated"] = (
             -transitions[self.config.ei_col].fillna(0)
             + transitions["upstream_ei_exposure"].fillna(0)
@@ -454,6 +456,29 @@ class TransitionDynamicsBuilder:
         next_col = f"{col}_next"
         if col in df.columns and next_col in df.columns:
             df[output_col] = df[next_col] - df[col]
+
+    @staticmethod
+    def _add_strict_green_upgrade(df: pd.DataFrame) -> None:
+        if "delta_ei" not in df.columns:
+            raise ValueError("Cannot define strict_green_upgrade without delta_ei.")
+
+        delta_ei = pd.to_numeric(df["delta_ei"], errors="coerce")
+        threshold = delta_ei.quantile(0.25)
+
+        if pd.isna(threshold):
+            logging.warning(
+                "Could not compute delta_ei 25th percentile. "
+                "Filling strict_green_upgrade with 0."
+            )
+            df["strict_green_upgrade"] = 0
+            return
+
+        df["strict_green_upgrade"] = (delta_ei < threshold).astype(int)
+        logging.info("Strict green upgrade delta_ei threshold: %.6g", threshold)
+        logging.info(
+            "Strict green upgrade rate: %.4f",
+            df["strict_green_upgrade"].mean(),
+        )
 
     @staticmethod
     def _check_columns(df: pd.DataFrame, required: list[str]) -> None:
