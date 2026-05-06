@@ -1,29 +1,15 @@
 import pandas as pd
-from pathlib import Path
 
-for file in Path("data/abm").glob("*.parquet"):
-    df = pd.read_parquet(file)
-    print(f"\n=== {file.name} ===")
-    print(df.shape)
-    print(df.columns.tolist())
-    print(df.head())
+year = 2000
 
-for file in Path("data/abm/model_outputs").glob("*.csv"):
-    print(f"\n=== {file.name} ===")
-    print(pd.read_csv(file).head(20))
+et = pd.read_parquet(f"data/metrics/{year}/et_{year}.parquet")
+metrics = pd.read_parquet(f"data/metrics/{year}/metrics_{year}.parquet")
 
-df = pd.read_parquet("data/abm/simulation_output.parquet")
+print("ET shape:", et.shape)
+print("Metrics length:", len(metrics))
 
-print(df["regime"].value_counts())
-print(df["emissions_intensity"].describe())
+print("\nFirst ET index:")
+print(et.index[:5])
 
-df = pd.read_parquet("data/abm/simulation_output_v2.parquet")
-
-print("\nRegime counts by simulated year:")
-print(pd.crosstab(df["sim_year"], df["regime"], normalize="index"))
-
-print("\nRegime change share by simulated year:")
-print(df.groupby("sim_year")["regime_changed"].mean())
-
-print("\nEI summary:")
-print(df.groupby("sim_year")["emissions_intensity"].describe())
+print("\nFirst metrics country_sector:")
+print(metrics["country_sector"].head())
