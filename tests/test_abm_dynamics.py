@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from src.abm.dynamics import (
+from src.abm_v2.dynamics import (
     update_production,
     update_inventory,
     update_emissions_intensity,

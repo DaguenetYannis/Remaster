@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.abm.transition_diagnostics import TransitionDiagnostics
-from src.abm.transition_plots import TransitionPlotter
+from src.abm_v2.transition_diagnostics import TransitionDiagnostics
+from src.abm_v2.transition_plots import TransitionPlotter
 
 
 def main() -> None:

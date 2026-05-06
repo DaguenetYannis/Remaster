@@ -11,7 +11,7 @@ from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from src.abm.scenario_config import DEFAULT_SCENARIOS, ScenarioConfig
+from src.abm_v2.scenario_config import DEFAULT_SCENARIOS, ScenarioConfig
 
 
 class ScenarioRunner:

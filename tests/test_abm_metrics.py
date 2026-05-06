@@ -1,6 +1,6 @@
 import pandas as pd
 
-from src.abm.metrics import ABMMetricsBuilder, MetricsConfig
+from src.abm_v2.metrics import ABMMetricsBuilder, MetricsConfig
 
 
 def test_parse_country_sector():

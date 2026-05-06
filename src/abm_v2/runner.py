@@ -5,15 +5,15 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.abm.calibrate import (
+from src.abm_v2.calibrate import (
     apply_calibrated_parameters,
     calibrate_scenario,
     load_calibrated_parameters,
 )
-from src.abm.metrics import build_abm_metrics_panel
-from src.abm.model import GreenTransitionABM
-from src.abm.plots import ABMPlotter
-from src.abm.scenarii import Scenario, get_scenario, list_scenarios
+from src.abm_v2.metrics import build_abm_metrics_panel
+from src.abm_v2.model import GreenTransitionABM
+from src.abm_v2.plots import ABMPlotter
+from src.abm_v2.scenarii import Scenario, get_scenario, list_scenarios
 
 
 def load_or_build_metrics_panel(

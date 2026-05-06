@@ -10,8 +10,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.abm.model import GreenTransitionABM
-from src.abm.scenarii import Scenario, get_scenario
+from src.abm_v2.model import GreenTransitionABM
+from src.abm_v2.scenarii import Scenario, get_scenario
 
 
 LOGGER = logging.getLogger(__name__)

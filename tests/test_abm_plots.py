@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.abm.plots import ABMPlotter
+from src.abm_v2.plots import ABMPlotter
 
 
 def make_aggregate_results() -> pd.DataFrame:

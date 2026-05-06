@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.abm.dynamics import (
+from src.abm_v2.dynamics import (
     compute_mean_emissions_intensity,
     compute_mean_greeness,
     compute_total_emissions,
@@ -16,7 +16,7 @@ from src.abm.dynamics import (
     update_local_greeness,
     update_production,
 )
-from src.abm.scenarii import Scenario
+from src.abm_v2.scenarii import Scenario
 
 
 @dataclass

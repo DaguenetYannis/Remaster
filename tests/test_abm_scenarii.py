@@ -1,6 +1,6 @@
 import pytest
 
-from src.abm.scenarii import (
+from src.abm_v2.scenarii import (
     BASELINE,
     get_scenario,
     list_scenarios,
