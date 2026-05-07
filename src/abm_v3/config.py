@@ -13,15 +13,24 @@ class CalibrationConfig:
     validation_split_year: int = 2008
     production_features: tuple[str, ...] = (
         "log_X_lag1",
+        "D_growth",
         "demand_gap",
         "sector_X_growth",
         "country_X_growth",
+        "input_availability_ratio",
+        "inventory_stress",
+        "capacity_utilization",
     )
     emissions_features: tuple[str, ...] = (
         "log_EI_lag1",
         "green_capability",
+        "g_in",
+        "g_out",
         "g_network",
+        "general_complexity",
     )
+    sigma_grid: tuple[float, ...] = (0.0, 0.1, 0.25, 0.5, 0.75, 1.0)
+    minimum_training_window: int = 6
 
 
 @dataclass(frozen=True)

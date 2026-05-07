@@ -25,5 +25,8 @@ class ABMV3OutputWriter:
         target_dir.mkdir(parents=True, exist_ok=True)
         path = target_dir / filename
         LOGGER.info("Writing %s rows to %s", len(df), path)
-        df.to_parquet(path, index=False)
+        if path.suffix.lower() == ".csv":
+            df.to_csv(path, index=False)
+        else:
+            df.to_parquet(path, index=False)
         return path

@@ -4,8 +4,10 @@ import argparse
 import logging
 
 from src.abm_v3.config import ABMV3Config
+from src.abm_v3.diagnostics.hypothesis_reports import HypothesisReportGenerator
 from src.abm_v3.model import ABMV3Model
 from src.abm_v3.paths import ABMV3Paths
+from src.abm_v3.real_data_smoke_test import RealDataSmokeTester
 from src.abm_v3.scenarios.registry import list_scenarios
 
 
@@ -16,6 +18,8 @@ def build_parser() -> argparse.ArgumentParser:
     calibrate = subparsers.add_parser("calibrate")
     calibrate.add_argument("--start-year", type=int, default=1995)
     calibrate.add_argument("--end-year", type=int, default=2016)
+    calibrate.add_argument("--ei-mode", default="green_transition")
+    calibrate.add_argument("--validation-mode", default="rolling")
 
     validate = subparsers.add_parser("validate")
     validate.add_argument("--split-year", type=int, default=2008)
@@ -26,6 +30,18 @@ def build_parser() -> argparse.ArgumentParser:
     simulate.add_argument("--end-year", type=int, default=2027)
 
     subparsers.add_parser("compare-scenarios")
+
+    smoke_test = subparsers.add_parser("smoke-test")
+    smoke_test.add_argument("--no-write", action="store_true")
+
+    fit_historical = subparsers.add_parser("fit-historical")
+    fit_historical.add_argument("--start-year", type=int, default=1995)
+    fit_historical.add_argument("--end-year", type=int, default=2016)
+    fit_historical.add_argument("--ei-mode", default="green_transition")
+    fit_historical.add_argument("--validation-mode", default="rolling")
+
+    hypothesis_report = subparsers.add_parser("hypothesis-report")
+    hypothesis_report.add_argument("--ei-mode", default="green_transition")
     return parser
 
 
@@ -35,11 +51,11 @@ def main() -> None:
     model = ABMV3Model(config=ABMV3Config(), paths=ABMV3Paths())
 
     if args.command == "calibrate":
-        result = model.fit_historical(args.start_year, args.end_year)
-        print(f"Calibration scaffold: {result}")
+        result = model.fit_historical(args.start_year, args.end_year, args.ei_mode, args.validation_mode)
+        print(f"Calibration result: {result}")
     elif args.command == "validate":
         result = model.validate_historical(args.split_year)
-        print(f"Validation scaffold: {result}")
+        print(f"Validation result: {result}")
     elif args.command == "simulate":
         result = model.simulate(args.start_year, args.end_year, scenario=args.scenario)
         print(
@@ -48,6 +64,26 @@ def main() -> None:
         )
     elif args.command == "compare-scenarios":
         print(f"Scenario comparison scaffold. Registered scenarios: {list_scenarios()}")
+    elif args.command == "smoke-test":
+        report = RealDataSmokeTester(ABMV3Paths()).run(write_report=not args.no_write)
+        print(f"Smoke test complete: rows={len(report)}, passed={int(report['passed'].sum()) if 'passed' in report.columns else 0}")
+    elif args.command == "fit-historical":
+        result = model.fit_historical(
+            args.start_year,
+            args.end_year,
+            ei_mode=args.ei_mode,
+            validation_mode=args.validation_mode,
+        )
+        print(f"Historical fit result: {result}")
+    elif args.command == "hypothesis-report":
+        panel = model.prepare_model_ready_panel(
+            model.data_loader.load_historical_panel(
+                model.config.calibration.start_year,
+                model.config.calibration.end_year,
+            )
+        )
+        reports = HypothesisReportGenerator(model.paths).write_all(panel)
+        print(f"Hypothesis reports written: {list(reports)}")
 
 
 if __name__ == "__main__":

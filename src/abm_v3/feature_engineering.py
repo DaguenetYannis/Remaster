@@ -113,6 +113,34 @@ class FeatureEngineer:
             how="left",
         )
 
+    def create_group_level_growth(
+        self,
+        df: pd.DataFrame,
+        group_col: str,
+        value_col: str,
+        output_col: str,
+    ) -> pd.DataFrame:
+        """Create transparent group-year growth for controls such as sector EI."""
+
+        result = df.copy()
+        if not {group_col, self.year_col, value_col}.issubset(result.columns):
+            LOGGER.warning(
+                "Cannot create %s; required columns are missing.",
+                output_col,
+            )
+            return result
+        group_year = (
+            result.groupby([group_col, self.year_col], as_index=False)[value_col]
+            .mean()
+            .sort_values([group_col, self.year_col])
+        )
+        group_year[output_col] = group_year.groupby(group_col)[value_col].pct_change()
+        return result.merge(
+            group_year[[group_col, self.year_col, output_col]],
+            on=[group_col, self.year_col],
+            how="left",
+        )
+
     def create_emissions(self, df: pd.DataFrame) -> pd.DataFrame:
         result = df.copy()
         if {"X", "EI"}.issubset(result.columns):
@@ -136,18 +164,21 @@ class FeatureEngineer:
         """
 
         result = self.sort_panel(df)
-        missing = [column for column in [x_col, ei_col] if column not in result.columns]
-        if missing:
-            LOGGER.warning("Cannot create next-period targets; missing columns: %s", missing)
-            for target_col in ["X_next", "EI_next", "delta_log_X_next", "delta_log_EI_next"]:
-                if target_col not in result.columns:
-                    result[target_col] = np.nan
-            return result
+        if x_col in result.columns:
+            result["X_next"] = result.groupby(self.node_col)[x_col].shift(-1)
+            result["delta_log_X_next"] = safe_log(result["X_next"]) - safe_log(result[x_col])
+        else:
+            LOGGER.warning("Cannot create production target; missing column: %s", x_col)
+            result["X_next"] = np.nan
+            result["delta_log_X_next"] = np.nan
 
-        result["X_next"] = result.groupby(self.node_col)[x_col].shift(-1)
-        result["EI_next"] = result.groupby(self.node_col)[ei_col].shift(-1)
-        result["delta_log_X_next"] = safe_log(result["X_next"]) - safe_log(result[x_col])
-        result["delta_log_EI_next"] = safe_log(result["EI_next"]) - safe_log(result[ei_col])
+        if ei_col in result.columns:
+            result["EI_next"] = result.groupby(self.node_col)[ei_col].shift(-1)
+            result["delta_log_EI_next"] = safe_log(result["EI_next"]) - safe_log(result[ei_col])
+        else:
+            LOGGER.warning("Cannot create EI target; missing column: %s", ei_col)
+            result["EI_next"] = np.nan
+            result["delta_log_EI_next"] = np.nan
         return result
 
     def create_production_planning_scaffolds(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -183,6 +214,8 @@ class FeatureEngineer:
         result = self.create_demand_gaps(result)
         result = self.create_sector_level_growth(result)
         result = self.create_country_level_growth(result)
+        result = self.create_group_level_growth(result, "Sector", "EI", "sector_EI_growth")
+        result = self.create_group_level_growth(result, "Country", "EI", "country_EI_growth")
         result = self.create_production_planning_scaffolds(result)
         result = self.create_emissions(result)
         result = self.create_next_period_targets(result)

@@ -19,6 +19,45 @@ class HistoricalValidator:
         validation = df[df["Year"] > split].copy()
         return calibration, validation
 
+    def rolling_splits(
+        self,
+        start_year: int = 1995,
+        end_year: int = 2016,
+        minimum_training_window: int = 6,
+    ) -> list[dict[str, int]]:
+        """Return expanding-window validation splits.
+
+        The first split trains on ``minimum_training_window`` years and
+        validates the next year, then the training window expands one year at a
+        time through ``end_year``.
+        """
+
+        first_validation_year = start_year + minimum_training_window
+        return [
+            {
+                "train_start_year": start_year,
+                "train_end_year": validation_year - 1,
+                "validation_year": validation_year,
+            }
+            for validation_year in range(first_validation_year, end_year + 1)
+        ]
+
+    def fixed_split_years(
+        self,
+        start_year: int,
+        end_year: int,
+        split_year: int | None = None,
+    ) -> list[dict[str, int]]:
+        split = self.split_year if split_year is None else split_year
+        return [
+            {
+                "train_start_year": start_year,
+                "train_end_year": split,
+                "validation_year": validation_year,
+            }
+            for validation_year in range(split + 1, end_year + 1)
+        ]
+
     def validate_simulation(self, simulated: pd.DataFrame, observed: pd.DataFrame) -> dict[str, float]:
         merged = simulated.merge(
             observed,
