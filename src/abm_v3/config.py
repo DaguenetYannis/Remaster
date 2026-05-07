@@ -78,6 +78,14 @@ class SubstitutionConfig:
 
 
 @dataclass(frozen=True)
+class ProductionFeasibilityConfig:
+    """Scalar input-feasibility settings for monetary input intensity."""
+
+    minimum_input_intensity: float = 1e-9
+    input_rigidity: float = 0.5
+
+
+@dataclass(frozen=True)
 class OutputConfig:
     """Output locations under the ABM v3 output root."""
 
@@ -97,4 +105,5 @@ class ABMV3Config:
     greenness: GreennessConfig = field(default_factory=GreennessConfig)
     capability: CapabilityConfig = field(default_factory=CapabilityConfig)
     substitution: SubstitutionConfig = field(default_factory=SubstitutionConfig)
+    production_feasibility: ProductionFeasibilityConfig = field(default_factory=ProductionFeasibilityConfig)
     outputs: OutputConfig = field(default_factory=OutputConfig)

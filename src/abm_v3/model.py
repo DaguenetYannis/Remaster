@@ -158,6 +158,7 @@ class ABMV3Model:
             emissions_model=self.emissions_model,
             demand_provider=DemandProvider(None),
             sigma=self.substitution_model.get_sigma() if self.substitution_model else self.config.substitution.substitution_friction,
+            input_rigidity=self.config.production_feasibility.input_rigidity,
         )
         states = [initial_state.nodes.assign(scenario=scenario_obj.name)]
         state = initial_state
@@ -292,6 +293,7 @@ class ABMV3Model:
             emissions_model=emissions_model or self.emissions_model,
             demand_provider=DemandProvider(historical_panel=panel),
             sigma=self.config.substitution.substitution_friction if sigma is None else sigma,
+            input_rigidity=self.config.production_feasibility.input_rigidity,
         )
         next_state, diagnostics = engine.step(state, next_year=next_year)
         return next_state.nodes.assign(**{key: value for key, value in diagnostics.items() if key != "year"})
@@ -314,6 +316,7 @@ class ABMV3Model:
                 emissions_model=self.emissions_model,
                 demand_provider=DemandProvider(historical_panel=panel),
                 sigma=sigma,
+                input_rigidity=self.config.production_feasibility.input_rigidity,
             )
             state, _diagnostics = engine.step(state, next_year=year)
             states.append(state.nodes.assign(simulation_type="historical_recursive"))

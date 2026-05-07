@@ -82,6 +82,7 @@ class ABMV3InputPanelBuilder:
             all_raw_labels.update(zip(accounting_panel["Year"].astype(int), accounting_panel["country_sector"].astype(str)))
             merged_panel = self.merge_with_metrics(accounting_panel, metrics_panel)
             merged_panel, negative_report = self.handle_negative_accounting_values(merged_panel)
+            merged_panel = self.add_input_intensity_features(merged_panel)
             merged_panel = self.add_required_aliases(merged_panel)
             year_panels.append(merged_panel)
             report_rows.append(
@@ -112,6 +113,8 @@ class ABMV3InputPanelBuilder:
         self.write_build_report(pd.DataFrame(report_rows), start_year, end_year)
         self.write_unmatched_labels(all_raw_labels, all_merged_labels, start_year, end_year)
         self.write_column_dictionary()
+        self.write_negative_ei_rows(panel, start_year, end_year)
+        self.write_input_intensity_summary(panel, start_year, end_year)
         LOGGER.info("Built ABM v3 input panel with %s rows at %s", len(panel), output_path)
         return panel
 
@@ -244,6 +247,8 @@ class ABMV3InputPanelBuilder:
                 result["general_complexity"] = np.nan
         if "EI" in result.columns:
             result["emissions_observed"] = result["X_observed"].astype(float) * result["EI"].astype(float)
+            negative_ei_mask = pd.to_numeric(result["EI"], errors="coerce") < 0
+            result.loc[negative_ei_mask, "emissions_observed"] = np.nan
         else:
             result["EI"] = np.nan
             result["emissions_observed"] = np.nan
@@ -251,6 +256,95 @@ class ABMV3InputPanelBuilder:
             if column not in result.columns:
                 result[column] = np.nan
         return result
+
+    def add_input_intensity_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add observed and fallback monetary input-intensity columns."""
+
+        result = df.copy()
+        minimum = float(self.config.production_feasibility.minimum_input_intensity)
+        result["observed_input_intensity"] = self._safe_input_ratio(
+            result["M_observed"],
+            result["X_observed"],
+        )
+        node_valid = self._valid_input_intensity(result["observed_input_intensity"], minimum) & (
+            pd.to_numeric(result["M_observed"], errors="coerce") > 0
+        )
+
+        result["country_category_input_intensity"] = self._group_input_intensity(
+            result,
+            ["Country", "Category", "Year"],
+            minimum,
+        )
+        result["country_ecosystem_input_intensity"] = self._group_input_intensity(
+            result,
+            ["Country", "Year"],
+            minimum,
+        )
+        result["sector_input_intensity"] = self._group_input_intensity(
+            result,
+            ["Sector", "Year"],
+            minimum,
+        )
+        result["global_input_intensity"] = self._group_input_intensity(
+            result,
+            ["Year"],
+            minimum,
+        )
+
+        result["effective_input_intensity"] = np.nan
+        result["input_intensity_source"] = "missing"
+        fallback_order = [
+            ("node", "observed_input_intensity", node_valid),
+            (
+                "country_category",
+                "country_category_input_intensity",
+                self._valid_input_intensity(result["country_category_input_intensity"], minimum),
+            ),
+            (
+                "country_ecosystem",
+                "country_ecosystem_input_intensity",
+                self._valid_input_intensity(result["country_ecosystem_input_intensity"], minimum),
+            ),
+            (
+                "sector",
+                "sector_input_intensity",
+                self._valid_input_intensity(result["sector_input_intensity"], minimum),
+            ),
+            (
+                "global",
+                "global_input_intensity",
+                self._valid_input_intensity(result["global_input_intensity"], minimum),
+            ),
+        ]
+        unset = result["effective_input_intensity"].isna()
+        for source, column, valid_mask in fallback_order:
+            use_mask = unset & valid_mask
+            result.loc[use_mask, "effective_input_intensity"] = result.loc[use_mask, column]
+            result.loc[use_mask, "input_intensity_source"] = source
+            unset = result["effective_input_intensity"].isna()
+        return result
+
+    def _safe_input_ratio(self, numerator: pd.Series, denominator: pd.Series) -> pd.Series:
+        numerator_numeric = pd.to_numeric(numerator, errors="coerce")
+        denominator_numeric = pd.to_numeric(denominator, errors="coerce")
+        ratio = numerator_numeric / denominator_numeric.where(denominator_numeric > 0)
+        return ratio.replace([np.inf, -np.inf], np.nan)
+
+    def _valid_input_intensity(self, series: pd.Series, minimum: float) -> pd.Series:
+        numeric = pd.to_numeric(series, errors="coerce")
+        return numeric.notna() & np.isfinite(numeric) & (numeric > minimum)
+
+    def _group_input_intensity(
+        self,
+        df: pd.DataFrame,
+        group_cols: list[str],
+        minimum: float,
+    ) -> pd.Series:
+        grouped = df.groupby(group_cols, dropna=False)
+        group_m = grouped["M_observed"].transform("sum")
+        group_x = grouped["X_observed"].transform("sum")
+        ratio = self._safe_input_ratio(group_m, group_x)
+        return ratio.where(self._valid_input_intensity(ratio, minimum))
 
     def handle_negative_accounting_values(self, df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]]:
         result = df.copy()
@@ -313,6 +407,13 @@ class ABMV3InputPanelBuilder:
             ("D", "Model-ready historical demand proxy alias.", "D_proxy_observed", "proxy", "Not true behavioural demand."),
             ("M", "Model-ready intermediate proxy alias.", "M_observed", "proxy", ""),
             ("available_inputs", "Historical input availability proxy.", "M_observed", "proxy", "Not an observed input stock."),
+            ("observed_input_intensity", "Observed monetary input intensity.", "M_observed / X_observed", "observed", "Invalid for feasibility when zero or missing."),
+            ("country_category_input_intensity", "Country-category fallback input intensity.", "grouped accounting", "proxy", "sum(M_observed) / sum(X_observed)."),
+            ("country_ecosystem_input_intensity", "Country ecosystem fallback input intensity.", "grouped accounting", "proxy", "Country-Year grouped ratio."),
+            ("sector_input_intensity", "Global sector fallback input intensity.", "grouped accounting", "proxy", "Sector-Year grouped ratio."),
+            ("global_input_intensity", "Global fallback input intensity.", "grouped accounting", "proxy", "Year grouped ratio."),
+            ("effective_input_intensity", "Input intensity used for scalar feasibility.", "fallback hierarchy", "proxy", "Source recorded in input_intensity_source."),
+            ("input_intensity_source", "Fallback source used for effective input intensity.", "fallback hierarchy", "proxy", "node/country_category/country_ecosystem/sector/global/missing."),
             ("K", "Capacity proxy.", "X_observed", "proxy", "capacity_margin * X_observed."),
             ("I", "Inventory proxy.", "M_observed", "proxy", "inventory_days * M_observed / 365."),
             ("EI", "Emissions intensity.", "metrics panel", "observed", "Missing values preserved."),
@@ -378,3 +479,92 @@ class ABMV3InputPanelBuilder:
         if not available:
             return len(df)
         return int(df[available].isna().all(axis=1).sum())
+
+    def write_negative_ei_rows(self, panel: pd.DataFrame, start_year: int, end_year: int) -> Path:
+        columns = ["Year", "country_sector", "Country", "Sector", "X_observed", "EI", "emissions_observed"]
+        if "EI" not in panel.columns:
+            rows = pd.DataFrame(columns=columns)
+        else:
+            negative_mask = pd.to_numeric(panel["EI"], errors="coerce") < 0
+            rows = panel.loc[negative_mask, columns].copy() if negative_mask.any() else pd.DataFrame(columns=columns)
+        return ABMV3OutputWriter(self.paths).write_dataframe(
+            rows,
+            "diagnostics",
+            f"negative_ei_rows_{start_year}_{end_year}.csv",
+        )
+
+    def write_input_intensity_summary(self, panel: pd.DataFrame, start_year: int, end_year: int) -> Path:
+        rows = []
+        if panel.empty:
+            summary = pd.DataFrame(columns=self._input_intensity_summary_columns())
+        else:
+            for year, year_panel in panel.groupby("Year", dropna=False):
+                rows.append(self._input_intensity_summary_row(year_panel, int(year)))
+            summary = pd.DataFrame(rows, columns=self._input_intensity_summary_columns())
+        return ABMV3OutputWriter(self.paths).write_dataframe(
+            summary,
+            "diagnostics",
+            f"input_intensity_summary_{start_year}_{end_year}.csv",
+        )
+
+    def _input_intensity_summary_row(self, df: pd.DataFrame, year: int) -> dict[str, object]:
+        observed = pd.to_numeric(df["observed_input_intensity"], errors="coerce")
+        effective = pd.to_numeric(df["effective_input_intensity"], errors="coerce")
+        valid_observed = self._valid_input_intensity(
+            observed,
+            float(self.config.production_feasibility.minimum_input_intensity),
+        ) & (pd.to_numeric(df["M_observed"], errors="coerce") > 0)
+        zero_m_positive_x = (
+            pd.to_numeric(df["M_observed"], errors="coerce").eq(0)
+            & (pd.to_numeric(df["X_observed"], errors="coerce") > 0)
+        )
+        source = df["input_intensity_source"]
+        node_count = len(df)
+        return {
+            "Year": year,
+            "node_count": node_count,
+            "valid_node_ratio_count": int(valid_observed.sum()),
+            "invalid_node_ratio_count": int((~valid_observed & observed.notna()).sum()),
+            "missing_node_ratio_count": int(observed.isna().sum()),
+            "zero_M_positive_X_count": int(zero_m_positive_x.sum()),
+            "median_observed_input_intensity": float(observed.median(skipna=True)),
+            "p05_observed_input_intensity": float(observed.quantile(0.05)),
+            "p95_observed_input_intensity": float(observed.quantile(0.95)),
+            "p99_observed_input_intensity": float(observed.quantile(0.99)),
+            "max_observed_input_intensity": float(observed.max(skipna=True)),
+            "median_effective_input_intensity": float(effective.median(skipna=True)),
+            "share_a_above_1": float((effective > 1).mean()),
+            "share_a_above_2": float((effective > 2).mean()),
+            "share_a_above_5": float((effective > 5).mean()),
+            "node_ratio_used_share": float(source.eq("node").mean()),
+            "country_category_fallback_share": float(source.eq("country_category").mean()),
+            "country_ecosystem_fallback_share": float(source.eq("country_ecosystem").mean()),
+            "sector_fallback_share": float(source.eq("sector").mean()),
+            "global_fallback_share": float(source.eq("global").mean()),
+            "missing_feasibility_share": float(source.eq("missing").mean()),
+        }
+
+    def _input_intensity_summary_columns(self) -> list[str]:
+        return [
+            "Year",
+            "node_count",
+            "valid_node_ratio_count",
+            "invalid_node_ratio_count",
+            "missing_node_ratio_count",
+            "zero_M_positive_X_count",
+            "median_observed_input_intensity",
+            "p05_observed_input_intensity",
+            "p95_observed_input_intensity",
+            "p99_observed_input_intensity",
+            "max_observed_input_intensity",
+            "median_effective_input_intensity",
+            "share_a_above_1",
+            "share_a_above_2",
+            "share_a_above_5",
+            "node_ratio_used_share",
+            "country_category_fallback_share",
+            "country_ecosystem_fallback_share",
+            "sector_fallback_share",
+            "global_fallback_share",
+            "missing_feasibility_share",
+        ]

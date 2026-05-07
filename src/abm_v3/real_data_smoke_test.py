@@ -71,6 +71,9 @@ class RealDataSmokeTester:
                 "EI",
                 "g_in",
                 "g_out",
+                "observed_input_intensity",
+                "effective_input_intensity",
+                "input_intensity_source",
             ]
             rows.extend(self._validation_result_rows([
                 validator.validate_required_columns(df, required_core),
@@ -80,6 +83,7 @@ class RealDataSmokeTester:
                 validator.validate_country_sector_key(df),
             ]))
             rows.extend(self._input_panel_zero_share_rows(df))
+            rows.extend(self._input_intensity_smoke_rows(df))
             rows.extend(self._constructibility_checks(df))
             rows.extend(self._missingness_rows(df))
             rows.append(self._valid_sector_check(df))
@@ -143,6 +147,33 @@ class RealDataSmokeTester:
                     "details": str({"share": float(df[column].eq(0).mean()) if column in df.columns else None}),
                 }
             )
+        return rows
+
+    def _input_intensity_smoke_rows(self, df: pd.DataFrame) -> list[dict[str, object]]:
+        rows = []
+        for column in ["observed_input_intensity", "effective_input_intensity"]:
+            rows.append(
+                {
+                    "check": f"share_{column}_missing",
+                    "passed": column in df.columns,
+                    "message": "Missing share calculated." if column in df.columns else "Column absent.",
+                    "details": str({"share": float(df[column].isna().mean()) if column in df.columns else None}),
+                }
+            )
+        if "input_intensity_source" in df.columns:
+            shares = df["input_intensity_source"].value_counts(normalize=True, dropna=False).to_dict()
+        else:
+            shares = {}
+        rows.append(
+            {
+                "check": "input_intensity_source_shares",
+                "passed": "input_intensity_source" in df.columns,
+                "message": "Input intensity fallback shares calculated."
+                if "input_intensity_source" in df.columns
+                else "input_intensity_source absent.",
+                "details": str(shares),
+            }
+        )
         return rows
 
     def _check_file_exists(self, path: Path) -> dict[str, object]:

@@ -107,3 +107,35 @@ def test_green_supplier_preference_not_used_in_base_step() -> None:
 
     assert node_a["substitution_gain"] > 0
     assert diagnostics["total_substitution_gain"] > 0
+
+
+def test_step_engine_uses_soft_input_constraint() -> None:
+    nodes = pd.DataFrame(
+        {
+            "country_sector": ["A"],
+            "Sector": ["Manufacturing"],
+            "Year": [1995],
+            "X": [100.0],
+            "D": [100.0],
+            "EI": [1.0],
+            "available_inputs": [40.0],
+            "K": [120.0],
+            "effective_input_intensity": [0.4],
+            "input_intensity_source": ["node"],
+        }
+    )
+    historical_panel = pd.DataFrame({"country_sector": ["A"], "Year": [1996], "D": [100.0]})
+    engine = ABMV3StepEngine(
+        demand_provider=DemandProvider(historical_panel=historical_panel),
+        sigma=0.0,
+        input_rigidity=0.5,
+    )
+
+    next_state, diagnostics = engine.step(
+        ABMState(nodes=nodes, metadata=ABMStateMetadata(year=1995)),
+        next_year=1996,
+    )
+
+    assert next_state.nodes.loc[0, "realized_output"] == 100.0
+    assert next_state.nodes.loc[0, "input_feasible_output"] == 100.0
+    assert diagnostics["total_realized_output"] == 100.0

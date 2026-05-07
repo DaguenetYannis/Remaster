@@ -214,3 +214,45 @@ def test_column_dictionary_written() -> None:
     dictionary_path = paths.abm_v3_output_root / "diagnostics" / "abm_v3_input_panel_column_dictionary.csv"
     dictionary = pd.read_csv(dictionary_path)
     assert {"column", "description", "source", "observed_or_proxy", "notes"}.issubset(dictionary.columns)
+
+
+def test_negative_ei_diagnostic_written() -> None:
+    paths = toy_paths()
+    panel = pd.DataFrame(
+        {
+            "Year": [1995],
+            "country_sector": ["A"],
+            "Country": ["AAA"],
+            "Sector": ["Agriculture"],
+            "X_observed": [100.0],
+            "EI": [-1.0],
+            "emissions_observed": [np.nan],
+        }
+    )
+
+    ABMV3InputPanelBuilder(paths).write_negative_ei_rows(panel, 1995, 2016)
+
+    path = paths.abm_v3_output_root / "diagnostics" / "negative_ei_rows_1995_2016.csv"
+    rows = pd.read_csv(path)
+    assert rows["country_sector"].tolist() == ["A"]
+
+
+def test_input_intensity_summary_contains_fallback_shares() -> None:
+    paths = toy_paths()
+    panel = pd.DataFrame(
+        {
+            "Year": [1995, 1995],
+            "observed_input_intensity": [0.4, 0.0],
+            "effective_input_intensity": [0.4, 0.25],
+            "input_intensity_source": ["node", "country_category"],
+            "X_observed": [100.0, 100.0],
+            "M_observed": [40.0, 0.0],
+        }
+    )
+
+    ABMV3InputPanelBuilder(paths).write_input_intensity_summary(panel, 1995, 2016)
+
+    path = paths.abm_v3_output_root / "diagnostics" / "input_intensity_summary_1995_2016.csv"
+    summary = pd.read_csv(path)
+    assert "node_ratio_used_share" in summary.columns
+    assert "country_category_fallback_share" in summary.columns
