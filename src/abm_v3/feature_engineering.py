@@ -16,6 +16,13 @@ def safe_divide(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
     return result.replace([np.inf, -np.inf], np.nan)
 
 
+def safe_log(series: pd.Series) -> pd.Series:
+    """Log positive values and return NaN for zero, negative, or missing values."""
+
+    numeric = pd.to_numeric(series, errors="coerce")
+    return np.log(numeric.where(numeric > 0))
+
+
 @dataclass
 class FeatureEngineer:
     """Create transparent model-ready features from country-sector panels."""
@@ -114,6 +121,61 @@ class FeatureEngineer:
             LOGGER.warning("Cannot create emissions; X or EI is missing.")
         return result
 
+    def create_next_period_targets(
+        self,
+        df: pd.DataFrame,
+        x_col: str = "X",
+        ei_col: str = "EI",
+    ) -> pd.DataFrame:
+        """Create one-step-ahead calibration targets for production and EI.
+
+        Targets remain NaN when current or next-period values are unavailable,
+        zero, or negative. NaN targets are preserved so calibration models can
+        explicitly drop incomplete rows instead of treating missing dynamics as
+        zero change.
+        """
+
+        result = self.sort_panel(df)
+        missing = [column for column in [x_col, ei_col] if column not in result.columns]
+        if missing:
+            LOGGER.warning("Cannot create next-period targets; missing columns: %s", missing)
+            for target_col in ["X_next", "EI_next", "delta_log_X_next", "delta_log_EI_next"]:
+                if target_col not in result.columns:
+                    result[target_col] = np.nan
+            return result
+
+        result["X_next"] = result.groupby(self.node_col)[x_col].shift(-1)
+        result["EI_next"] = result.groupby(self.node_col)[ei_col].shift(-1)
+        result["delta_log_X_next"] = safe_log(result["X_next"]) - safe_log(result[x_col])
+        result["delta_log_EI_next"] = safe_log(result["EI_next"]) - safe_log(result[ei_col])
+        return result
+
+    def create_production_planning_scaffolds(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Create optional production-planning signals when source data exists."""
+
+        result = df.copy()
+        if {"available_inputs", "X"}.issubset(result.columns):
+            result["input_availability_ratio"] = safe_divide(result["available_inputs"], result["X"])
+        else:
+            LOGGER.warning("Cannot create input_availability_ratio; available_inputs or X is missing.")
+            result["input_availability_ratio"] = np.nan
+
+        inventory_col = "I" if "I" in result.columns else "inventory" if "inventory" in result.columns else None
+        if inventory_col is not None and "D" in result.columns:
+            result["inventory_stress"] = 1.0 - safe_divide(result[inventory_col], result["D"])
+        else:
+            LOGGER.warning("Cannot create inventory_stress; inventory/I or D is missing.")
+            result["inventory_stress"] = np.nan
+
+        capacity_col = "K" if "K" in result.columns else "capacity" if "capacity" in result.columns else None
+        if capacity_col is not None and "X" in result.columns:
+            result["capacity_utilization"] = safe_divide(result["X"], result[capacity_col])
+        else:
+            LOGGER.warning("Cannot create capacity_utilization; capacity/K or X is missing.")
+            result["capacity_utilization"] = np.nan
+
+        return result
+
     def create_model_ready_panel(self, df: pd.DataFrame) -> pd.DataFrame:
         result = self.sort_panel(df)
         result = self.create_lags(result, ["X", "EI", "D"])
@@ -121,11 +183,13 @@ class FeatureEngineer:
         result = self.create_demand_gaps(result)
         result = self.create_sector_level_growth(result)
         result = self.create_country_level_growth(result)
+        result = self.create_production_planning_scaffolds(result)
         result = self.create_emissions(result)
+        result = self.create_next_period_targets(result)
         if "X_lag1" in result.columns:
-            result["log_X_lag1"] = np.log(result["X_lag1"].where(result["X_lag1"] > 0))
+            result["log_X_lag1"] = safe_log(result["X_lag1"])
         if "EI_lag1" in result.columns:
-            result["log_EI_lag1"] = np.log(result["EI_lag1"].where(result["EI_lag1"] > 0))
+            result["log_EI_lag1"] = safe_log(result["EI_lag1"])
         if {"g_in", "g_out"}.issubset(result.columns):
             result["g_network"] = 0.5 * (result["g_in"].astype(float) + result["g_out"].astype(float))
         return result

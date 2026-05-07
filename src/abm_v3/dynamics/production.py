@@ -23,8 +23,13 @@ def realize_production(
     demand: pd.Series,
     input_availability: pd.Series,
 ) -> pd.Series:
-    """Realize output subject to demand and input availability constraints."""
+    """Realize output after substitution subject to quantity constraints.
+
+    This is the final feasibility check. It is not an anti-collapse guardrail:
+    missing or binding constraints remain visible in the output instead of
+    being reset upward.
+    """
 
     combined = pd.concat([planned_output, demand, input_availability], axis=1).astype(float)
-    realized = combined.min(axis=1)
+    realized = combined.min(axis=1, skipna=False)
     return pd.Series(realized, index=planned_output.index, name="realized_output")
