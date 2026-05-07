@@ -59,7 +59,7 @@ class ABMV3Model:
         start = self.config.calibration.start_year if start_year is None else start_year
         end = self.config.calibration.end_year if end_year is None else end_year
         LOGGER.info("Historical ABM v3 fit requested for %s-%s with EI mode %s.", start, end, ei_mode)
-        panel = self.data_loader.load_historical_panel(start, end)
+        panel = self.data_loader.load_abm_ready_historical_panel(start, end, self.config)
         smoke_report = RealDataSmokeTester(self.paths, self.config).run(panel, write_report=True)
         model_ready_panel = self.prepare_model_ready_panel(panel)
         missing_core = [column for column in ["country_sector", "Year", "X", "D", "EI"] if column not in model_ready_panel.columns]
@@ -118,7 +118,13 @@ class ABMV3Model:
     def validate_historical(self, split_year: int | None = None) -> dict[str, object]:
         split = self.config.calibration.validation_split_year if split_year is None else split_year
         LOGGER.info("Fixed-split historical validation requested with split year %s.", split)
-        panel = self.prepare_model_ready_panel(self.data_loader.load_historical_panel(self.config.calibration.start_year, self.config.calibration.end_year))
+        panel = self.prepare_model_ready_panel(
+            self.data_loader.load_abm_ready_historical_panel(
+                self.config.calibration.start_year,
+                self.config.calibration.end_year,
+                self.config,
+            )
+        )
         missing_core = [column for column in ["country_sector", "Year", "X", "D", "EI"] if column not in panel.columns]
         if missing_core:
             LOGGER.warning("Historical validation blocked; missing core columns: %s", missing_core)
@@ -331,10 +337,15 @@ class ABMV3Model:
         raise ValueError(f"Unsupported validation mode: {validation_mode}")
 
     def _validation_metrics(self, predicted: pd.DataFrame, observed: pd.DataFrame) -> dict[str, float]:
-        merged = predicted.merge(
-            observed[["country_sector", "Year", "X", "EI"]],
+        predicted_subset = predicted[["country_sector", "Year", "X", "EI"]].rename(
+            columns={"X": "X_simulated", "EI": "EI_simulated"}
+        )
+        observed_subset = observed[["country_sector", "Year", "X", "EI"]].rename(
+            columns={"X": "X_actual", "EI": "EI_actual"}
+        )
+        merged = predicted_subset.merge(
+            observed_subset,
             on=["country_sector", "Year"],
-            suffixes=("_simulated", "_observed"),
             how="inner",
         )
         collapse = detect_bad_transition(
@@ -342,8 +353,8 @@ class ABMV3Model:
             predicted.assign(X=predicted["X"], EI=predicted["EI"]),
         )
         return {
-            "output_loss": output_loss(merged["X_simulated"], merged["X_observed"]),
-            "ei_loss": output_loss(merged["EI_simulated"], merged["EI_observed"]),
+            "output_loss": output_loss(merged["X_simulated"], merged["X_actual"]),
+            "ei_loss": output_loss(merged["EI_simulated"], merged["EI_actual"]),
             "matched_rows": float(len(merged)),
             "total_substitution_gain": float(predicted.get("total_substitution_gain", pd.Series([np.nan])).iloc[0]),
             "bad_transition": float(collapse["bad_transition"]),
@@ -356,9 +367,10 @@ class ABMV3Model:
             sim_year = simulated[simulated["Year"] == year]
             obs_year = observed[observed["Year"] == year]
             merged = sim_year.merge(
-                obs_year[["country_sector", "Year", "X", "EI"]],
+                obs_year[["country_sector", "Year", "X", "EI"]].rename(
+                    columns={"X": "X_actual", "EI": "EI_actual"}
+                ),
                 on=["country_sector", "Year"],
-                suffixes=("_simulated", "_observed"),
                 how="inner",
             )
             rows.append(
@@ -366,7 +378,7 @@ class ABMV3Model:
                     "Year": year,
                     "global_output_simulated": float(sim_year["X"].sum()),
                     "global_output_observed": float(obs_year["X"].sum()),
-                    "global_output_loss": output_loss(merged["X_simulated"], merged["X_observed"]),
+                    "global_output_loss": output_loss(merged["X"], merged["X_actual"]),
                     "matched_rows": len(merged),
                 }
             )
@@ -375,14 +387,26 @@ class ABMV3Model:
     def _write_model_coefficients(self) -> None:
         writer = ABMV3OutputWriter(self.paths)
         if self.production_model is not None:
+            production_coefficients = (
+                self.production_model.get_coefficients()
+                .rename("coefficient")
+                .reset_index()
+                .rename(columns={"index": "feature"})
+            )
             writer.write_dataframe(
-                self.production_model.get_coefficients().rename("coefficient").reset_index(names="feature"),
+                production_coefficients,
                 "calibration",
                 "production_model_coefficients.csv",
             )
         if self.emissions_model is not None:
+            emissions_coefficients = (
+                self.emissions_model.get_coefficients()
+                .rename("coefficient")
+                .reset_index()
+                .rename(columns={"index": "feature"})
+            )
             writer.write_dataframe(
-                self.emissions_model.get_coefficients().rename("coefficient").reset_index(names="feature"),
+                emissions_coefficients,
                 "calibration",
                 "emissions_model_coefficients.csv",
             )

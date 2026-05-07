@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from src.abm_v3.config import ABMV3Config
+from src.abm_v3.input_panel_builder import ABMV3InputPanelBuilder
 from src.abm_v3.paths import ABMV3Paths
 
 LOGGER = logging.getLogger(__name__)
@@ -48,3 +50,19 @@ class ABMV3DataLoader:
             end_year,
         )
         return filtered
+
+    def load_abm_ready_historical_panel(
+        self,
+        start_year: int,
+        end_year: int,
+        config: ABMV3Config | None = None,
+    ) -> pd.DataFrame:
+        """Load or build the canonical ABM-ready historical panel."""
+
+        path = self.paths.abm_v3_historical_panel_file(start_year, end_year)
+        if path.exists():
+            LOGGER.info("Loading ABM-ready historical panel from %s", path)
+            return pd.read_parquet(path)
+        LOGGER.info("ABM-ready historical panel missing at %s; building it now.", path)
+        builder = ABMV3InputPanelBuilder(self.paths, config or ABMV3Config())
+        return builder.build(start_year=start_year, end_year=end_year, overwrite=False)

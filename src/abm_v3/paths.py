@@ -53,6 +53,16 @@ class ABMV3Paths:
     def abm_v3_output_root(self) -> Path:
         return self.data_root / "abm_v3"
 
+    @property
+    def abm_v3_input_root(self) -> Path:
+        return self.abm_v3_output_root / "inputs"
+
+    def abm_v3_historical_panel_file(self, start_year: int, end_year: int) -> Path:
+        return (
+            self.abm_v3_input_root
+            / f"abm_v3_historical_panel_{start_year}_{end_year}.parquet"
+        )
+
     def metric_file(self, year: int, metric_name: str) -> Path:
         return self.metrics_root / str(year) / f"{metric_name}_{year}.parquet"
 

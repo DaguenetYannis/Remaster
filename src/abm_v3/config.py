@@ -31,6 +31,8 @@ class CalibrationConfig:
     )
     sigma_grid: tuple[float, ...] = (0.0, 0.1, 0.25, 0.5, 0.75, 1.0)
     minimum_training_window: int = 6
+    capacity_margin: float = 1.10
+    inventory_days: int = 30
 
 
 @dataclass(frozen=True)

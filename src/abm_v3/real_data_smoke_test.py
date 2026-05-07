@@ -21,11 +21,28 @@ class RealDataSmokeTester:
 
     paths: ABMV3Paths
     config: ABMV3Config = field(default_factory=ABMV3Config)
+    start_year: int = 1995
+    end_year: int = 2016
 
-    def run(self, df: pd.DataFrame | None = None, write_report: bool = True) -> pd.DataFrame:
+    def run(
+        self,
+        df: pd.DataFrame | None = None,
+        write_report: bool = True,
+        panel_kind: str = "auto",
+    ) -> pd.DataFrame:
         if df is None:
-            path = self.paths.eora_atlas_merged_file
+            path, using_input_panel = self._select_panel_path(panel_kind)
             rows = [self._check_file_exists(path)]
+            rows.append(
+                {
+                    "check": "abm_ready_input_panel_selected",
+                    "passed": using_input_panel,
+                    "message": "Smoke test selected ABM-ready input panel."
+                    if using_input_panel
+                    else "Smoke test selected old merged metrics panel.",
+                    "details": str({"path": str(path)}),
+                }
+            )
             if not path.exists():
                 report = pd.DataFrame(rows)
                 if write_report:
@@ -38,8 +55,43 @@ class RealDataSmokeTester:
             df = pd.read_parquet(path)
         else:
             rows = [{"check": "file_exists", "passed": True, "message": "Dataframe supplied directly.", "details": ""}]
+            using_input_panel = self._looks_like_input_panel(df)
 
         validator = DataContractValidator()
+        if using_input_panel:
+            required_core = [
+                "country_sector",
+                "Country",
+                "Sector",
+                "Year",
+                "X",
+                "D",
+                "M",
+                "available_inputs",
+                "EI",
+                "g_in",
+                "g_out",
+            ]
+            rows.extend(self._validation_result_rows([
+                validator.validate_required_columns(df, required_core),
+                validator.validate_year_coverage(df, 1995, 2016),
+                validator.validate_no_duplicate_nodes(df),
+                validator.validate_non_negative(df, ["X", "D", "M", "available_inputs", "EI"]),
+                validator.validate_country_sector_key(df),
+            ]))
+            rows.extend(self._input_panel_zero_share_rows(df))
+            rows.extend(self._constructibility_checks(df))
+            rows.extend(self._missingness_rows(df))
+            rows.append(self._valid_sector_check(df))
+            report = pd.DataFrame(rows)
+            if write_report:
+                ABMV3OutputWriter(self.paths).write_dataframe(
+                    report,
+                    "diagnostics",
+                    "real_data_smoke_test.csv",
+                )
+            return report
+
         rows.extend(self._validation_result_rows([
             validator.validate_required_columns(df, ["Country", "Sector", "Year"]),
             validator.validate_year_coverage(df, 1995, 2016),
@@ -64,6 +116,34 @@ class RealDataSmokeTester:
                 "real_data_smoke_test.csv",
             )
         return report
+
+    def _select_panel_path(self, panel_kind: str) -> tuple[Path, bool]:
+        input_panel_path = self.paths.abm_v3_historical_panel_file(self.start_year, self.end_year)
+        if panel_kind == "input_panel":
+            return input_panel_path, True
+        if panel_kind == "merged_panel":
+            return self.paths.eora_atlas_merged_file, False
+        if panel_kind != "auto":
+            raise ValueError(f"Unsupported smoke-test panel kind: {panel_kind}")
+        if input_panel_path.exists():
+            return input_panel_path, True
+        return self.paths.eora_atlas_merged_file, False
+
+    def _looks_like_input_panel(self, df: pd.DataFrame) -> bool:
+        return {"X", "D", "M", "available_inputs"}.issubset(df.columns)
+
+    def _input_panel_zero_share_rows(self, df: pd.DataFrame) -> list[dict[str, object]]:
+        rows = []
+        for column in ["X", "D", "M"]:
+            rows.append(
+                {
+                    "check": f"share_zero_{column}",
+                    "passed": column in df.columns,
+                    "message": "Zero share calculated." if column in df.columns else "Column absent.",
+                    "details": str({"share": float(df[column].eq(0).mean()) if column in df.columns else None}),
+                }
+            )
+        return rows
 
     def _check_file_exists(self, path: Path) -> dict[str, object]:
         return {
