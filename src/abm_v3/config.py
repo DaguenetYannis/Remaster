@@ -115,6 +115,12 @@ class LeontiefPropagationConfig:
     spectral_radius_max_iter: int = 1000
     spectral_radius_tolerance: float = 1e-8
     max_negative_flow_rows: int = 10000
+    behavioural_capacity_eta: float = 0.5
+    behavioural_default_mode: str = "fd_without_inventory"
+    behavioural_capacity_missing_policy: str = "unconstrained_with_flag"
+    behavioural_tolerance: float = 1e-8
+    behavioural_max_rounds: int = 200
+    write_behavioural_node_rounds: bool = True
 
 
 @dataclass(frozen=True)

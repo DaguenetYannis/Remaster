@@ -120,6 +120,33 @@ class ABMV3Paths:
     def leontief_mode_comparison_range_path(self, start_year: int, end_year: int) -> Path:
         return self.leontief_diagnostics_dir / f"leontief_mode_comparison_{start_year}_{end_year}.csv"
 
+    @property
+    def behavioural_leontief_dir(self) -> Path:
+        return self.leontief_dir / "behavioural"
+
+    @property
+    def behavioural_leontief_outputs_dir(self) -> Path:
+        return self.behavioural_leontief_dir / "outputs"
+
+    @property
+    def behavioural_leontief_diagnostics_dir(self) -> Path:
+        return self.behavioural_leontief_dir / "diagnostics"
+
+    def behavioural_leontief_output_path(self, year: int, mode: str = "fd_without_inventory") -> Path:
+        return self.behavioural_leontief_outputs_dir / f"behavioural_leontief_output_{year}_{mode}.parquet"
+
+    def behavioural_leontief_summary_path(self, year: int, mode: str = "fd_without_inventory") -> Path:
+        return self.behavioural_leontief_diagnostics_dir / f"behavioural_leontief_summary_{year}_{mode}.csv"
+
+    def behavioural_leontief_node_comparison_path(self, year: int, mode: str = "fd_without_inventory") -> Path:
+        return self.behavioural_leontief_diagnostics_dir / f"behavioural_leontief_node_comparison_{year}_{mode}.csv"
+
+    def behavioural_leontief_rounds_path(self, year: int, mode: str = "fd_without_inventory") -> Path:
+        return self.behavioural_leontief_diagnostics_dir / f"behavioural_leontief_rounds_{year}_{mode}.csv"
+
+    def behavioural_leontief_node_rounds_path(self, year: int, mode: str = "fd_without_inventory") -> Path:
+        return self.behavioural_leontief_diagnostics_dir / f"behavioural_leontief_node_rounds_{year}_{mode}.csv"
+
     def metric_file(self, year: int, metric_name: str) -> Path:
         return self.metrics_root / str(year) / f"{metric_name}_{year}.parquet"
 

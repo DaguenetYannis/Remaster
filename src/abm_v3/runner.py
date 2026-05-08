@@ -7,8 +7,14 @@ from dataclasses import replace
 import pandas as pd
 
 from src.abm_v3.config import ABMV3Config
+from src.abm_v3.data_loader import ABMV3DataLoader
 from src.abm_v3.diagnostics.hypothesis_reports import HypothesisReportGenerator
 from src.abm_v3.input_panel_builder import ABMV3InputPanelBuilder
+from src.abm_v3.leontief.behavioural import (
+    BehaviouralLeontiefEngine,
+    BehaviouralLeontiefOutputWriter,
+    BehaviouralLeontiefValidator,
+)
 from src.abm_v3.leontief.coefficients import LeontiefCoefficientBuilder
 from src.abm_v3.leontief.comparison import LeontiefModeComparator
 from src.abm_v3.leontief.outputs import LeontiefOutputWriter
@@ -101,6 +107,23 @@ def build_parser() -> argparse.ArgumentParser:
     leontief_compare_modes_range.add_argument("--tolerance", type=float, default=None)
     leontief_compare_modes_range.add_argument("--max-rounds", type=int, default=None)
     leontief_compare_modes_range.add_argument("--column-sum-cap", type=float, default=None)
+
+    behavioural_leontief = subparsers.add_parser("behavioural-leontief")
+    behavioural_leontief.add_argument("--year", type=int, required=True)
+    behavioural_leontief.add_argument("--mode", default=None)
+    behavioural_leontief.add_argument("--eta-capacity", type=float, default=None)
+    behavioural_leontief.add_argument("--tolerance", type=float, default=None)
+    behavioural_leontief.add_argument("--max-rounds", type=int, default=None)
+    behavioural_leontief.add_argument("--no-node-rounds", action="store_true")
+
+    behavioural_leontief_range = subparsers.add_parser("behavioural-leontief-range")
+    behavioural_leontief_range.add_argument("--start-year", type=int, required=True)
+    behavioural_leontief_range.add_argument("--end-year", type=int, required=True)
+    behavioural_leontief_range.add_argument("--mode", default=None)
+    behavioural_leontief_range.add_argument("--eta-capacity", type=float, default=None)
+    behavioural_leontief_range.add_argument("--tolerance", type=float, default=None)
+    behavioural_leontief_range.add_argument("--max-rounds", type=int, default=None)
+    behavioural_leontief_range.add_argument("--no-node-rounds", action="store_true")
     return parser
 
 
@@ -214,7 +237,93 @@ def build_leontief_config(args: argparse.Namespace) -> ABMV3Config:
         leontief_config = replace(leontief_config, leontief_mode=args.mode)
     if hasattr(args, "column_sum_cap") and args.column_sum_cap is not None:
         leontief_config = replace(leontief_config, leontief_column_sum_cap=args.column_sum_cap)
+    if hasattr(args, "eta_capacity") and args.eta_capacity is not None:
+        leontief_config = replace(leontief_config, behavioural_capacity_eta=args.eta_capacity)
+    if hasattr(args, "no_node_rounds") and args.no_node_rounds:
+        leontief_config = replace(leontief_config, write_behavioural_node_rounds=False)
     return replace(config, leontief=leontief_config)
+
+
+def build_behavioural_leontief_config(args: argparse.Namespace) -> ABMV3Config:
+    config = build_leontief_config(args)
+    leontief_config = config.leontief
+    mode = args.mode if getattr(args, "mode", None) is not None else leontief_config.behavioural_default_mode
+    leontief_config = replace(leontief_config, leontief_mode=mode)
+    if getattr(args, "tolerance", None) is not None:
+        leontief_config = replace(leontief_config, behavioural_tolerance=args.tolerance)
+    if getattr(args, "max_rounds", None) is not None:
+        leontief_config = replace(leontief_config, behavioural_max_rounds=args.max_rounds)
+    return replace(config, leontief=leontief_config)
+
+
+def load_behavioural_capacity(paths: ABMV3Paths, config: ABMV3Config, year: int) -> pd.Series:
+    """Load same-year K from the canonical ABM-ready input panel."""
+    print("[ABM v3 Behavioural Leontief] Loading capacity from ABM-ready panel...")
+    panel = ABMV3DataLoader(paths).load_abm_ready_historical_panel(
+        config.calibration.start_year,
+        config.calibration.end_year,
+        config,
+    )
+    required_columns = {"Year", "country_sector", "K"}
+    missing = required_columns.difference(panel.columns)
+    if missing:
+        raise ValueError(f"ABM-ready panel is missing required capacity columns: {sorted(missing)}")
+    year_panel = panel.loc[panel["Year"].astype(int) == int(year), ["country_sector", "K"]].copy()
+    if year_panel.empty:
+        raise ValueError(f"No ABM-ready capacity rows found for year {year}")
+    return pd.Series(
+        pd.to_numeric(year_panel["K"], errors="coerce").to_numpy(dtype=float),
+        index=year_panel["country_sector"].astype(str),
+        name="K",
+    )
+
+
+def run_behavioural_leontief_year(
+    year: int,
+    paths: ABMV3Paths | None = None,
+    config: ABMV3Config | None = None,
+) -> dict[str, object]:
+    active_paths = paths or ABMV3Paths()
+    active_config = config or ABMV3Config()
+    print(
+        "[ABM v3 Behavioural Leontief] "
+        f"Loading year {year} with mode={active_config.leontief.leontief_mode}..."
+    )
+    year_data = LeontiefCoefficientBuilder(active_paths, active_config.leontief).load_year(year)
+    capacity = load_behavioural_capacity(active_paths, active_config, year)
+    result = BehaviouralLeontiefEngine(active_config.leontief).propagate(year_data, capacity)
+    validator = BehaviouralLeontiefValidator()
+    node_comparison = validator.build_node_comparison(year_data, result)
+    summary = validator.build_summary(year_data, result, node_comparison)
+    written_paths = BehaviouralLeontiefOutputWriter(active_paths).write_all(
+        year_data,
+        result,
+        node_comparison,
+        summary,
+    )
+    relative_error = summary["relative_error_total"].iloc[0]
+    print(
+        "[ABM v3 Behavioural Leontief] "
+        f"Finished: converged={result.converged}, rounds_used={result.rounds_used}"
+    )
+    print(
+        "[ABM v3 Behavioural Leontief] "
+        f"observed_total={summary['observed_output_total'].iloc[0]:.12g}, "
+        f"realized_total={summary['realized_output_total'].iloc[0]:.12g}, "
+        f"relative_error={relative_error:.12g}"
+    )
+    print(
+        "[ABM v3 Behavioural Leontief] "
+        f"Wrote diagnostics to {active_paths.behavioural_leontief_diagnostics_dir}"
+    )
+    return {
+        "year_data": year_data,
+        "capacity": capacity,
+        "result": result,
+        "node_comparison": node_comparison,
+        "summary": summary,
+        "written_paths": written_paths,
+    }
 
 
 def main() -> None:
@@ -304,6 +413,17 @@ def main() -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         combined.to_csv(output_path, index=False)
         print(f"[ABM v3 Leontief] Wrote range mode comparison to {output_path}")
+    elif args.command == "behavioural-leontief":
+        run_behavioural_leontief_year(
+            args.year,
+            paths=ABMV3Paths(),
+            config=build_behavioural_leontief_config(args),
+        )
+    elif args.command == "behavioural-leontief-range":
+        config = build_behavioural_leontief_config(args)
+        for year in range(args.start_year, args.end_year + 1):
+            print(f"[ABM v3 Behavioural Leontief] Range progress: year={year}")
+            run_behavioural_leontief_year(year, paths=ABMV3Paths(), config=config)
 
 
 if __name__ == "__main__":
