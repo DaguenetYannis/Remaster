@@ -16,6 +16,7 @@ from src.abm_v3.config import ABMV3Config
 from src.abm_v3.data_loader import ABMV3DataLoader
 from src.abm_v3.diagnostics.collapse import detect_bad_transition
 from src.abm_v3.diagnostics.hypothesis_reports import HypothesisReportGenerator
+from src.abm_v3.diagnostics.production_bottlenecks import ProductionBottleneckReporter
 from src.abm_v3.dynamics.demand_provider import DemandProvider
 from src.abm_v3.dynamics.step import ABMV3StepEngine
 from src.abm_v3.feature_engineering import FeatureEngineer
@@ -83,6 +84,8 @@ class ABMV3Model:
             splits=splits,
             ei_mode=ei_mode,
             sigma=sigma_model.get_sigma(),
+            validation_mode=validation_mode,
+            write_bottleneck_reports=True,
         )
         writer = ABMV3OutputWriter(self.paths)
         writer.write_dataframe(validation_results, "validation", "rolling_validation_results.csv")
@@ -101,6 +104,16 @@ class ABMV3Model:
             )
             summary = self._historical_reproduction_summary(full_reproduction, model_ready_panel)
             writer.write_dataframe(summary, "validation", "historical_reproduction_summary.csv")
+            ProductionBottleneckReporter(self.paths).write_recursive_by_year_report(
+                full_reproduction,
+                model_ready_panel,
+                split_metadata={
+                    "validation_mode": "historical_recursive",
+                    "start_year": start + 1,
+                    "sigma": sigma_model.get_sigma(),
+                    "ei_mode": ei_mode,
+                },
+            )
             HypothesisReportGenerator(self.paths).write_all(model_ready_panel, sigma_model.get_results())
 
         return {
@@ -136,7 +149,14 @@ class ABMV3Model:
             split,
         )
         sigma_model = self.calibrate_sigma(panel, splits, "green_transition")
-        results = self.run_validation_splits(panel, splits, "green_transition", sigma_model.get_sigma())
+        results = self.run_validation_splits(
+            panel,
+            splits,
+            "green_transition",
+            sigma_model.get_sigma(),
+            validation_mode="fixed_split",
+            write_bottleneck_reports=True,
+        )
         ABMV3OutputWriter(self.paths).write_dataframe(results, "validation", "fixed_split_validation_results.csv")
         return {"status": "validated", "split_year": split, "rows": len(results), "best_sigma": sigma_model.get_sigma()}
 
@@ -250,8 +270,12 @@ class ABMV3Model:
         splits: list[dict[str, int]],
         ei_mode: str,
         sigma: float,
+        validation_mode: str = "rolling",
+        write_bottleneck_reports: bool = False,
     ) -> pd.DataFrame:
         rows = []
+        node_reports = []
+        bottleneck_reporter = ProductionBottleneckReporter(self.paths)
         for split in splits:
             train_panel = panel[
                 (panel["Year"] >= split["train_start_year"])
@@ -270,9 +294,26 @@ class ABMV3Model:
                 observed = panel[panel["Year"] == split["validation_year"]].copy()
                 metrics = self._validation_metrics(predicted, observed)
                 rows.append({**split, "sigma": sigma, **metrics})
+                if write_bottleneck_reports:
+                    node_reports.append(
+                        bottleneck_reporter.build_node_report(
+                            predicted=predicted,
+                            observed=observed,
+                            validation_year=split["validation_year"],
+                            split_metadata={
+                                **split,
+                                "validation_mode": validation_mode,
+                                "sigma": sigma,
+                                "ei_mode": ei_mode,
+                            },
+                        )
+                    )
             except ValueError as error:
                 LOGGER.warning("Validation split failed and will be reported as NaN: %s", error)
                 rows.append({**split, "sigma": sigma, "error": str(error)})
+        if write_bottleneck_reports:
+            report_prefix = "rolling_validation" if validation_mode == "rolling" else validation_mode
+            bottleneck_reporter.write_reports(node_reports, prefix=report_prefix)
         return pd.DataFrame(rows)
 
     def predict_historical_one_step(
