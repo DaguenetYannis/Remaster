@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from src.abm_v3.leontief.coefficients import LeontiefCoefficientBuilder, LeontiefYearData
+from src.abm_v3.leontief.comparison import LeontiefModeComparator
 from src.abm_v3.leontief.outputs import LeontiefOutputWriter
 from src.abm_v3.leontief.propagation import LeontiefPropagationEngine, LeontiefPropagationResult
 from src.abm_v3.leontief.validation import LeontiefPropagationValidator
@@ -8,6 +9,7 @@ from src.abm_v3.leontief.viability import LeontiefViabilityAnalyzer, LeontiefVia
 
 __all__ = [
     "LeontiefCoefficientBuilder",
+    "LeontiefModeComparator",
     "LeontiefOutputWriter",
     "LeontiefPropagationEngine",
     "LeontiefPropagationResult",

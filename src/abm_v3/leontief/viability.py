@@ -73,8 +73,17 @@ class LeontiefViabilityAnalyzer:
 
         columns = year_data.labels.copy()
         columns.insert(0, "Year", year_data.year)
+        columns["mode"] = year_data.mode
         columns["X_observed"] = year_data.X_observed.to_numpy(dtype=float)
+        x_used = (
+            year_data.X_used_for_coefficients
+            if year_data.X_used_for_coefficients is not None
+            else year_data.X_observed
+        )
+        columns["X_used_for_coefficients"] = x_used.to_numpy(dtype=float)
         columns["Y_final_demand"] = year_data.Y_final_demand.to_numpy(dtype=float)
+        if year_data.Y_raw_final_demand is not None:
+            columns["Y_raw_final_demand"] = year_data.Y_raw_final_demand.to_numpy(dtype=float)
         columns["column_sum_A"] = column_sum
         columns["abs_column_sum_A"] = abs_column_sum
         columns["max_coefficient_A"] = max_coefficient
@@ -84,7 +93,7 @@ class LeontiefViabilityAnalyzer:
         columns["negative_coefficient_count"] = negative_count
         columns["positive_coefficient_count"] = positive_count
         columns["large_coefficient_count"] = large_count
-        x_values = columns["X_observed"].to_numpy(dtype=float)
+        x_values = columns["X_used_for_coefficients"].to_numpy(dtype=float)
         y_values = columns["Y_final_demand"].to_numpy(dtype=float)
         columns["invalid_output_column"] = (~np.isfinite(x_values)) | (x_values <= 0.0)
         columns["near_zero_positive_output"] = (x_values > 0.0) & (x_values <= self.config.near_zero_output_threshold)
@@ -118,6 +127,7 @@ class LeontiefViabilityAnalyzer:
             rows.append(
                 {
                     "Year": year_data.year,
+                    "mode": year_data.mode,
                     "matrix": matrix_name,
                     "approximate_spectral_radius": radius,
                     "converged": converged,
@@ -169,6 +179,7 @@ class LeontiefViabilityAnalyzer:
             [
                 {
                     "Year": year_data.year,
+                    "mode": year_data.mode,
                     "node_count": len(columns),
                     "invalid_output_column_count": int(columns["invalid_output_column"].sum()),
                     "near_zero_positive_output_count": int(columns["near_zero_positive_output"].sum()),

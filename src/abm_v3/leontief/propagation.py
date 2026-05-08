@@ -60,6 +60,7 @@ class LeontiefPropagationEngine:
             round_rows.append(
                 {
                     "year": year_data.year,
+                    "mode": year_data.mode,
                     "round": round_number,
                     "flow_total": flow_total,
                     "absolute_flow_total": absolute_flow_total,

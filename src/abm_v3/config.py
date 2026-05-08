@@ -91,6 +91,22 @@ class LeontiefPropagationConfig:
 
     tolerance: float = 1e-8
     max_rounds: int = 200
+    leontief_mode: str = "raw"
+    leontief_column_sum_cap: float = 0.99
+    inventory_label_patterns: tuple[str, ...] = (
+        "changes in inventories",
+        "p.52",
+        "inventories",
+        "inventory",
+    )
+    allowed_leontief_modes: tuple[str, ...] = (
+        "raw",
+        "fd_without_inventory",
+        "positive_final_demand_only",
+        "column_rescaled_if_sum_above_one",
+        "column_rescaled_if_abs_sum_above_one",
+    )
+    write_mode_diagnostics: bool = True
     use_sparse: bool = True
     write_round_diagnostics: bool = True
     near_zero_output_threshold: float = 1e-6

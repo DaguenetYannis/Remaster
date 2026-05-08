@@ -4,10 +4,13 @@ import argparse
 import logging
 from dataclasses import replace
 
+import pandas as pd
+
 from src.abm_v3.config import ABMV3Config
 from src.abm_v3.diagnostics.hypothesis_reports import HypothesisReportGenerator
 from src.abm_v3.input_panel_builder import ABMV3InputPanelBuilder
 from src.abm_v3.leontief.coefficients import LeontiefCoefficientBuilder
+from src.abm_v3.leontief.comparison import LeontiefModeComparator
 from src.abm_v3.leontief.outputs import LeontiefOutputWriter
 from src.abm_v3.leontief.propagation import LeontiefPropagationEngine
 from src.abm_v3.leontief.validation import LeontiefPropagationValidator
@@ -60,21 +63,44 @@ def build_parser() -> argparse.ArgumentParser:
 
     leontief_propagate = subparsers.add_parser("leontief-propagate")
     leontief_propagate.add_argument("--year", type=int, required=True)
+    leontief_propagate.add_argument("--mode", default="raw")
     leontief_propagate.add_argument("--tolerance", type=float, default=None)
     leontief_propagate.add_argument("--max-rounds", type=int, default=None)
+    leontief_propagate.add_argument("--column-sum-cap", type=float, default=None)
 
     leontief_range = subparsers.add_parser("leontief-propagate-range")
     leontief_range.add_argument("--start-year", type=int, required=True)
     leontief_range.add_argument("--end-year", type=int, required=True)
+    leontief_range.add_argument("--mode", default="raw")
     leontief_range.add_argument("--tolerance", type=float, default=None)
     leontief_range.add_argument("--max-rounds", type=int, default=None)
+    leontief_range.add_argument("--column-sum-cap", type=float, default=None)
 
     leontief_diagnose = subparsers.add_parser("leontief-diagnose")
     leontief_diagnose.add_argument("--year", type=int, required=True)
+    leontief_diagnose.add_argument("--mode", default="raw")
+    leontief_diagnose.add_argument("--column-sum-cap", type=float, default=None)
 
     leontief_diagnose_range = subparsers.add_parser("leontief-diagnose-range")
     leontief_diagnose_range.add_argument("--start-year", type=int, required=True)
     leontief_diagnose_range.add_argument("--end-year", type=int, required=True)
+    leontief_diagnose_range.add_argument("--mode", default="raw")
+    leontief_diagnose_range.add_argument("--column-sum-cap", type=float, default=None)
+
+    leontief_compare_modes = subparsers.add_parser("leontief-compare-modes")
+    leontief_compare_modes.add_argument("--year", type=int, required=True)
+    leontief_compare_modes.add_argument("--modes", nargs="+", default=None)
+    leontief_compare_modes.add_argument("--tolerance", type=float, default=None)
+    leontief_compare_modes.add_argument("--max-rounds", type=int, default=None)
+    leontief_compare_modes.add_argument("--column-sum-cap", type=float, default=None)
+
+    leontief_compare_modes_range = subparsers.add_parser("leontief-compare-modes-range")
+    leontief_compare_modes_range.add_argument("--start-year", type=int, required=True)
+    leontief_compare_modes_range.add_argument("--end-year", type=int, required=True)
+    leontief_compare_modes_range.add_argument("--modes", nargs="+", default=None)
+    leontief_compare_modes_range.add_argument("--tolerance", type=float, default=None)
+    leontief_compare_modes_range.add_argument("--max-rounds", type=int, default=None)
+    leontief_compare_modes_range.add_argument("--column-sum-cap", type=float, default=None)
     return parser
 
 
@@ -136,6 +162,7 @@ def run_leontief_diagnostics(
     summary = diagnostics.summary.iloc[0]
     spectral_a = diagnostics.spectral.loc[diagnostics.spectral["matrix"] == "A"].iloc[0]
     spectral_abs_a = diagnostics.spectral.loc[diagnostics.spectral["matrix"] == "abs_A"].iloc[0]
+    print(f"[ABM v3 Leontief] mode={year_data.mode}")
     print(f"[ABM v3 Leontief] suspicious_columns={summary['suspicious_column_count']}")
     print(f"[ABM v3 Leontief] near_zero_positive_output={summary['near_zero_positive_output_count']}")
     print(f"[ABM v3 Leontief] negative_final_demand={summary['negative_final_demand_count']}")
@@ -152,14 +179,41 @@ def run_leontief_diagnostics(
     return {"year_data": year_data, "diagnostics": diagnostics, "written_paths": written_paths}
 
 
+def run_leontief_mode_comparison(
+    year: int,
+    modes: list[str] | None = None,
+    paths: ABMV3Paths | None = None,
+    config: ABMV3Config | None = None,
+) -> pd.DataFrame:
+    """Run and write the Leontief mode comparison for one year."""
+    active_paths = paths or ABMV3Paths()
+    active_config = config or ABMV3Config()
+    print(f"[ABM v3 Leontief] Comparing coefficient modes for {year}")
+    comparison = LeontiefModeComparator(active_paths, active_config).compare_year(year, modes=modes)
+    for row in comparison.to_dict("records"):
+        print(
+            "[ABM v3 Leontief] "
+            f"mode={row['mode']}, "
+            f"spectral_radius={row['approximate_spectral_radius_A']:.12g}, "
+            f"converged={row['converged']}, "
+            f"relative_error={row['relative_error_total']:.12g}"
+        )
+    print(f"[ABM v3 Leontief] Wrote mode comparison to {active_paths.leontief_mode_comparison_path(year)}")
+    return comparison
+
+
 def build_leontief_config(args: argparse.Namespace) -> ABMV3Config:
     """Apply optional CLI Leontief overrides without mutating defaults."""
     config = ABMV3Config()
     leontief_config = config.leontief
-    if args.tolerance is not None:
+    if hasattr(args, "tolerance") and args.tolerance is not None:
         leontief_config = replace(leontief_config, tolerance=args.tolerance)
-    if args.max_rounds is not None:
+    if hasattr(args, "max_rounds") and args.max_rounds is not None:
         leontief_config = replace(leontief_config, max_rounds=args.max_rounds)
+    if hasattr(args, "mode") and args.mode is not None:
+        leontief_config = replace(leontief_config, leontief_mode=args.mode)
+    if hasattr(args, "column_sum_cap") and args.column_sum_cap is not None:
+        leontief_config = replace(leontief_config, leontief_column_sum_cap=args.column_sum_cap)
     return replace(config, leontief=leontief_config)
 
 
@@ -220,11 +274,36 @@ def main() -> None:
             print(f"[ABM v3 Leontief] Range progress: year={year}")
             run_leontief_year(year, paths=ABMV3Paths(), config=config)
     elif args.command == "leontief-diagnose":
-        run_leontief_diagnostics(args.year, paths=ABMV3Paths(), config=ABMV3Config())
+        run_leontief_diagnostics(args.year, paths=ABMV3Paths(), config=build_leontief_config(args))
     elif args.command == "leontief-diagnose-range":
+        config = build_leontief_config(args)
         for year in range(args.start_year, args.end_year + 1):
             print(f"[ABM v3 Leontief] Diagnostic range progress: year={year}")
-            run_leontief_diagnostics(year, paths=ABMV3Paths(), config=ABMV3Config())
+            run_leontief_diagnostics(year, paths=ABMV3Paths(), config=config)
+    elif args.command == "leontief-compare-modes":
+        run_leontief_mode_comparison(
+            args.year,
+            modes=args.modes,
+            paths=ABMV3Paths(),
+            config=build_leontief_config(args),
+        )
+    elif args.command == "leontief-compare-modes-range":
+        config = build_leontief_config(args)
+        comparisons = []
+        for year in range(args.start_year, args.end_year + 1):
+            comparisons.append(
+                run_leontief_mode_comparison(
+                    year,
+                    modes=args.modes,
+                    paths=ABMV3Paths(),
+                    config=config,
+                )
+            )
+        combined = pd.concat(comparisons, ignore_index=True) if comparisons else pd.DataFrame()
+        output_path = ABMV3Paths().leontief_mode_comparison_range_path(args.start_year, args.end_year)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        combined.to_csv(output_path, index=False)
+        print(f"[ABM v3 Leontief] Wrote range mode comparison to {output_path}")
 
 
 if __name__ == "__main__":

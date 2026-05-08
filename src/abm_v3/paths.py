@@ -75,35 +75,50 @@ class ABMV3Paths:
     def leontief_diagnostics_dir(self) -> Path:
         return self.leontief_dir / "diagnostics"
 
-    def leontief_iterative_output_path(self, year: int) -> Path:
-        return self.leontief_outputs_dir / f"leontief_iterative_output_{year}.parquet"
+    def leontief_iterative_output_path(self, year: int, mode: str = "raw") -> Path:
+        return self.leontief_outputs_dir / f"leontief_iterative_output_{year}_{mode}.parquet"
 
-    def leontief_summary_path(self, year: int) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_propagation_summary_{year}.csv"
+    def leontief_summary_path(self, year: int, mode: str = "raw") -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_propagation_summary_{year}_{mode}.csv"
 
-    def leontief_node_comparison_path(self, year: int) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_node_comparison_{year}.csv"
+    def leontief_node_comparison_path(self, year: int, mode: str = "raw") -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_node_comparison_{year}_{mode}.csv"
 
-    def leontief_rounds_path(self, year: int) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_rounds_{year}.csv"
+    def leontief_rounds_path(self, year: int, mode: str = "raw") -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_rounds_{year}_{mode}.csv"
 
-    def leontief_invalid_output_columns_path(self, year: int) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_invalid_output_columns_{year}.csv"
+    def leontief_invalid_output_columns_path(self, year: int, mode: str = "raw") -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_invalid_output_columns_{year}_{mode}.csv"
 
-    def leontief_viability_summary_path(self, year: int) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_coefficient_viability_summary_{year}.csv"
+    def leontief_viability_summary_path(self, year: int, mode: str = "raw") -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_coefficient_viability_summary_{year}_{mode}.csv"
 
-    def leontief_viability_columns_path(self, year: int) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_coefficient_viability_columns_{year}.csv"
+    def leontief_viability_columns_path(self, year: int, mode: str = "raw") -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_coefficient_viability_columns_{year}_{mode}.csv"
 
-    def leontief_negative_flows_path(self, year: int) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_negative_flows_{year}.csv"
+    def leontief_negative_flows_path(self, year: int, mode: str = "raw") -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_negative_flows_{year}_{mode}.csv"
 
-    def leontief_spectral_diagnostics_path(self, year: int) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_spectral_diagnostics_{year}.csv"
+    def leontief_spectral_diagnostics_path(self, year: int, mode: str = "raw") -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_spectral_diagnostics_{year}_{mode}.csv"
 
-    def leontief_top_unstable_nodes_path(self, year: int) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_top_unstable_nodes_{year}.csv"
+    def leontief_top_unstable_nodes_path(self, year: int, mode: str = "raw") -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_top_unstable_nodes_{year}_{mode}.csv"
+
+    def leontief_mode_diagnostics_path(self, year: int, mode: str = "raw") -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_mode_diagnostics_{year}_{mode}.csv"
+
+    def leontief_excluded_fd_columns_path(self, year: int, mode: str = "raw") -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_excluded_fd_columns_{year}_{mode}.csv"
+
+    def leontief_rescaled_columns_path(self, year: int, mode: str = "raw") -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_rescaled_columns_{year}_{mode}.csv"
+
+    def leontief_mode_comparison_path(self, year: int) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_mode_comparison_{year}.csv"
+
+    def leontief_mode_comparison_range_path(self, start_year: int, end_year: int) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_mode_comparison_{start_year}_{end_year}.csv"
 
     def metric_file(self, year: int, metric_name: str) -> Path:
         return self.metrics_root / str(year) / f"{metric_name}_{year}.parquet"

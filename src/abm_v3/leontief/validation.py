@@ -18,7 +18,12 @@ class LeontiefPropagationValidator:
         """Compare iterative output with observed Eora output by node."""
         comparison = year_data.labels.copy()
         comparison.insert(0, "Year", year_data.year)
+        comparison["mode"] = year_data.mode
         comparison["Y_final_demand"] = year_data.Y_final_demand.to_numpy(dtype=float)
+        if year_data.Y_raw_final_demand is not None:
+            comparison["Y_raw_final_demand"] = year_data.Y_raw_final_demand.to_numpy(dtype=float)
+        if year_data.X_used_for_coefficients is not None:
+            comparison["X_used_for_coefficients"] = year_data.X_used_for_coefficients.to_numpy(dtype=float)
         comparison["X_observed"] = year_data.X_observed.to_numpy(dtype=float)
         comparison["X_iterative"] = result.X_iterative.to_numpy(dtype=float)
         comparison["output_gap"] = comparison["X_iterative"] - comparison["X_observed"]
@@ -56,6 +61,7 @@ class LeontiefPropagationValidator:
             [
                 {
                     "Year": year_data.year,
+                    "mode": year_data.mode,
                     "rounds_used": result.rounds_used,
                     "tolerance": result.tolerance,
                     "max_rounds": result.max_rounds,
