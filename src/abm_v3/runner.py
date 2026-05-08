@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import argparse
 import logging
+from dataclasses import replace
 
 from src.abm_v3.config import ABMV3Config
 from src.abm_v3.diagnostics.hypothesis_reports import HypothesisReportGenerator
 from src.abm_v3.input_panel_builder import ABMV3InputPanelBuilder
+from src.abm_v3.leontief.coefficients import LeontiefCoefficientBuilder
+from src.abm_v3.leontief.outputs import LeontiefOutputWriter
+from src.abm_v3.leontief.propagation import LeontiefPropagationEngine
+from src.abm_v3.leontief.validation import LeontiefPropagationValidator
 from src.abm_v3.model import ABMV3Model
 from src.abm_v3.paths import ABMV3Paths
 from src.abm_v3.real_data_smoke_test import RealDataSmokeTester
@@ -51,7 +56,69 @@ def build_parser() -> argparse.ArgumentParser:
     build_input_panel.add_argument("--start-year", type=int, default=1995)
     build_input_panel.add_argument("--end-year", type=int, default=2016)
     build_input_panel.add_argument("--overwrite", action="store_true")
+
+    leontief_propagate = subparsers.add_parser("leontief-propagate")
+    leontief_propagate.add_argument("--year", type=int, required=True)
+    leontief_propagate.add_argument("--tolerance", type=float, default=None)
+    leontief_propagate.add_argument("--max-rounds", type=int, default=None)
+
+    leontief_range = subparsers.add_parser("leontief-propagate-range")
+    leontief_range.add_argument("--start-year", type=int, required=True)
+    leontief_range.add_argument("--end-year", type=int, required=True)
+    leontief_range.add_argument("--tolerance", type=float, default=None)
+    leontief_range.add_argument("--max-rounds", type=int, default=None)
     return parser
+
+
+def run_leontief_year(
+    year: int,
+    paths: ABMV3Paths | None = None,
+    config: ABMV3Config | None = None,
+) -> dict[str, object]:
+    """Build, propagate, validate, and write one Leontief baseline year."""
+    active_paths = paths or ABMV3Paths()
+    active_config = config or ABMV3Config()
+    coefficient_builder = LeontiefCoefficientBuilder(active_paths, active_config.leontief)
+    year_data = coefficient_builder.load_year(year)
+    engine = LeontiefPropagationEngine(
+        tolerance=active_config.leontief.tolerance,
+        max_rounds=active_config.leontief.max_rounds,
+    )
+    result = engine.propagate(year_data)
+    validator = LeontiefPropagationValidator()
+    node_comparison = validator.build_node_comparison(year_data, result)
+    summary = validator.build_summary(year_data, result, node_comparison)
+    written_paths = LeontiefOutputWriter(active_paths).write_all(year_data, result, node_comparison, summary)
+    relative_error = summary["relative_error_total"].iloc[0]
+    print(
+        f"[ABM v3 Leontief] Finished year {year}: "
+        f"converged={result.converged}, rounds_used={result.rounds_used}"
+    )
+    print(
+        "[ABM v3 Leontief] "
+        f"observed_total={summary['observed_output_total'].iloc[0]:.12g}, "
+        f"iterative_total={summary['accumulated_output_total'].iloc[0]:.12g}, "
+        f"relative_error={relative_error:.12g}"
+    )
+    print(f"[ABM v3 Leontief] Wrote diagnostics to {active_paths.leontief_diagnostics_dir}")
+    return {
+        "year_data": year_data,
+        "result": result,
+        "node_comparison": node_comparison,
+        "summary": summary,
+        "written_paths": written_paths,
+    }
+
+
+def build_leontief_config(args: argparse.Namespace) -> ABMV3Config:
+    """Apply optional CLI Leontief overrides without mutating defaults."""
+    config = ABMV3Config()
+    leontief_config = config.leontief
+    if args.tolerance is not None:
+        leontief_config = replace(leontief_config, tolerance=args.tolerance)
+    if args.max_rounds is not None:
+        leontief_config = replace(leontief_config, max_rounds=args.max_rounds)
+    return replace(config, leontief=leontief_config)
 
 
 def main() -> None:
@@ -103,6 +170,13 @@ def main() -> None:
         else:
             panel = builder.build(args.start_year, args.end_year, overwrite=args.overwrite)
             print(f"ABM-ready input panel written: {path} rows={len(panel)}")
+    elif args.command == "leontief-propagate":
+        run_leontief_year(args.year, paths=ABMV3Paths(), config=build_leontief_config(args))
+    elif args.command == "leontief-propagate-range":
+        config = build_leontief_config(args)
+        for year in range(args.start_year, args.end_year + 1):
+            print(f"[ABM v3 Leontief] Range progress: year={year}")
+            run_leontief_year(year, paths=ABMV3Paths(), config=config)
 
 
 if __name__ == "__main__":

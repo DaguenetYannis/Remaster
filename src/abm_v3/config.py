@@ -86,6 +86,16 @@ class ProductionFeasibilityConfig:
 
 
 @dataclass(frozen=True)
+class LeontiefPropagationConfig:
+    """Experimental on-the-fly Leontief propagation settings."""
+
+    tolerance: float = 1e-8
+    max_rounds: int = 200
+    use_sparse: bool = True
+    write_round_diagnostics: bool = True
+
+
+@dataclass(frozen=True)
 class OutputConfig:
     """Output locations under the ABM v3 output root."""
 
@@ -106,4 +116,5 @@ class ABMV3Config:
     capability: CapabilityConfig = field(default_factory=CapabilityConfig)
     substitution: SubstitutionConfig = field(default_factory=SubstitutionConfig)
     production_feasibility: ProductionFeasibilityConfig = field(default_factory=ProductionFeasibilityConfig)
+    leontief: LeontiefPropagationConfig = field(default_factory=LeontiefPropagationConfig)
     outputs: OutputConfig = field(default_factory=OutputConfig)
