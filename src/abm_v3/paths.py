@@ -90,6 +90,21 @@ class ABMV3Paths:
     def leontief_invalid_output_columns_path(self, year: int) -> Path:
         return self.leontief_diagnostics_dir / f"leontief_invalid_output_columns_{year}.csv"
 
+    def leontief_viability_summary_path(self, year: int) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_coefficient_viability_summary_{year}.csv"
+
+    def leontief_viability_columns_path(self, year: int) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_coefficient_viability_columns_{year}.csv"
+
+    def leontief_negative_flows_path(self, year: int) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_negative_flows_{year}.csv"
+
+    def leontief_spectral_diagnostics_path(self, year: int) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_spectral_diagnostics_{year}.csv"
+
+    def leontief_top_unstable_nodes_path(self, year: int) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_top_unstable_nodes_{year}.csv"
+
     def metric_file(self, year: int, metric_name: str) -> Path:
         return self.metrics_root / str(year) / f"{metric_name}_{year}.parquet"
 

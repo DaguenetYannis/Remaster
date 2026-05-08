@@ -93,6 +93,12 @@ class LeontiefPropagationConfig:
     max_rounds: int = 200
     use_sparse: bool = True
     write_round_diagnostics: bool = True
+    near_zero_output_threshold: float = 1e-6
+    large_coefficient_threshold: float = 10.0
+    high_abs_column_sum_threshold: float = 1.0
+    spectral_radius_max_iter: int = 1000
+    spectral_radius_tolerance: float = 1e-8
+    max_negative_flow_rows: int = 10000
 
 
 @dataclass(frozen=True)

@@ -4,6 +4,7 @@ import pandas as pd
 
 from src.abm_v3.leontief.coefficients import LeontiefYearData
 from src.abm_v3.leontief.propagation import LeontiefPropagationResult
+from src.abm_v3.leontief.viability import LeontiefViabilityDiagnostics
 from src.abm_v3.paths import ABMV3Paths
 
 
@@ -59,3 +60,29 @@ class LeontiefOutputWriter:
             pd.DataFrame(columns=columns).to_csv(path, index=False)
             return
         invalid_output_columns.reindex(columns=columns).to_csv(path, index=False)
+
+    def write_viability(self, diagnostics: LeontiefViabilityDiagnostics) -> dict[str, object]:
+        """Write coefficient viability diagnostics for one year."""
+        self.paths.leontief_diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = self.paths.leontief_viability_summary_path(diagnostics.year)
+        columns_path = self.paths.leontief_viability_columns_path(diagnostics.year)
+        negative_flows_path = self.paths.leontief_negative_flows_path(diagnostics.year)
+        spectral_path = self.paths.leontief_spectral_diagnostics_path(diagnostics.year)
+        top_nodes_path = self.paths.leontief_top_unstable_nodes_path(diagnostics.year)
+
+        diagnostics.summary.to_csv(summary_path, index=False)
+        diagnostics.columns.to_csv(columns_path, index=False)
+        diagnostics.negative_flows.to_csv(negative_flows_path, index=False)
+        diagnostics.spectral.to_csv(spectral_path, index=False)
+        if diagnostics.top_unstable_nodes is None:
+            diagnostics.columns.head(0).to_csv(top_nodes_path, index=False)
+        else:
+            diagnostics.top_unstable_nodes.to_csv(top_nodes_path, index=False)
+
+        return {
+            "viability_summary": summary_path,
+            "viability_columns": columns_path,
+            "negative_flows": negative_flows_path,
+            "spectral": spectral_path,
+            "top_unstable_nodes": top_nodes_path,
+        }

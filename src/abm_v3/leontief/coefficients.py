@@ -20,6 +20,11 @@ class LeontiefYearData:
     Y_final_demand: pd.Series
     A: sparse.spmatrix
     invalid_output_columns: pd.DataFrame | None = None
+    negative_flows: pd.DataFrame | None = None
+    total_negative_T_entries: int = 0
+    total_negative_FD_entries: int = 0
+    most_negative_T_value: float = np.nan
+    most_negative_FD_value: float = np.nan
 
 
 class LeontiefCoefficientBuilder:
@@ -52,6 +57,12 @@ class LeontiefCoefficientBuilder:
         x_values = (t_matrix.sum(axis=0).to_numpy(dtype=float) + y_values).astype(float)
         y_final_demand = pd.Series(y_values, index=labels, name="Y_final_demand")
         x_observed = pd.Series(x_values, index=labels, name="X_observed")
+        negative_flows, negative_summary = self._build_negative_flow_diagnostics(
+            year,
+            labels,
+            t_matrix,
+            fd_matrix,
+        )
 
         invalid_output_columns = self._build_invalid_output_columns(year, labels_frame, x_observed)
         print("[ABM v3 Leontief] Building sparse A...")
@@ -64,6 +75,11 @@ class LeontiefCoefficientBuilder:
             Y_final_demand=y_final_demand,
             A=coefficient_matrix,
             invalid_output_columns=invalid_output_columns,
+            negative_flows=negative_flows,
+            total_negative_T_entries=negative_summary["total_negative_T_entries"],
+            total_negative_FD_entries=negative_summary["total_negative_FD_entries"],
+            most_negative_T_value=negative_summary["most_negative_T_value"],
+            most_negative_FD_value=negative_summary["most_negative_FD_value"],
         )
 
     def _load_labels_T(self, year: int) -> list[str]:
@@ -182,3 +198,91 @@ class LeontiefCoefficientBuilder:
         coefficient_matrix = t_sparse @ sparse.diags(inverse_output, format="csc")
         coefficient_matrix.eliminate_zeros()
         return coefficient_matrix.tocsr()
+
+    def _build_negative_flow_diagnostics(
+        self,
+        year: int,
+        labels: list[str],
+        t_matrix: pd.DataFrame,
+        fd_matrix: pd.DataFrame,
+    ) -> tuple[pd.DataFrame, dict[str, object]]:
+        max_rows = int(self.config.max_negative_flow_rows)
+        t_values = t_matrix.to_numpy(dtype=float, copy=False)
+        fd_values = fd_matrix.to_numpy(dtype=float, copy=False)
+        t_negative_mask = np.isfinite(t_values) & (t_values < 0.0)
+        fd_negative_mask = np.isfinite(fd_values) & (fd_values < 0.0)
+        total_negative_t = int(t_negative_mask.sum())
+        total_negative_fd = int(fd_negative_mask.sum())
+        most_negative_t = float(np.nanmin(t_values[t_negative_mask])) if total_negative_t else np.nan
+        most_negative_fd = float(np.nanmin(fd_values[fd_negative_mask])) if total_negative_fd else np.nan
+        t_rows = self._negative_t_rows(year, labels, t_values, t_negative_mask, max_rows)
+        remaining_rows = max(0, max_rows - len(t_rows))
+        fd_rows = self._negative_fd_rows(year, labels, list(fd_matrix.columns), fd_values, fd_negative_mask, remaining_rows)
+        negative_flows = pd.DataFrame(
+            t_rows + fd_rows,
+            columns=["Year", "matrix", "row_country_sector", "col_country_sector", "col_label", "value"],
+        )
+        summary = {
+            "total_negative_T_entries": total_negative_t,
+            "total_negative_FD_entries": total_negative_fd,
+            "most_negative_T_value": most_negative_t,
+            "most_negative_FD_value": most_negative_fd,
+        }
+        return negative_flows, summary
+
+    def _negative_t_rows(
+        self,
+        year: int,
+        labels: list[str],
+        values: np.ndarray,
+        negative_mask: np.ndarray,
+        max_rows: int,
+    ) -> list[dict[str, object]]:
+        row_indices, col_indices = np.where(negative_mask)
+        if len(row_indices) > max_rows:
+            selected = np.argsort(values[row_indices, col_indices])[:max_rows]
+            row_indices = row_indices[selected]
+            col_indices = col_indices[selected]
+        rows = []
+        for row_index, col_index in zip(row_indices, col_indices):
+            rows.append(
+                {
+                    "Year": year,
+                    "matrix": "T",
+                    "row_country_sector": labels[int(row_index)],
+                    "col_country_sector": labels[int(col_index)],
+                    "col_label": "",
+                    "value": float(values[row_index, col_index]),
+                }
+            )
+        return rows
+
+    def _negative_fd_rows(
+        self,
+        year: int,
+        labels: list[str],
+        fd_columns: list[object],
+        values: np.ndarray,
+        negative_mask: np.ndarray,
+        max_rows: int,
+    ) -> list[dict[str, object]]:
+        if max_rows <= 0:
+            return []
+        row_indices, col_indices = np.where(negative_mask)
+        if len(row_indices) > max_rows:
+            selected = np.argsort(values[row_indices, col_indices])[:max_rows]
+            row_indices = row_indices[selected]
+            col_indices = col_indices[selected]
+        rows = []
+        for row_index, col_index in zip(row_indices, col_indices):
+            rows.append(
+                {
+                    "Year": year,
+                    "matrix": "FD",
+                    "row_country_sector": labels[int(row_index)],
+                    "col_country_sector": "",
+                    "col_label": str(fd_columns[int(col_index)]),
+                    "value": float(values[row_index, col_index]),
+                }
+            )
+        return rows
