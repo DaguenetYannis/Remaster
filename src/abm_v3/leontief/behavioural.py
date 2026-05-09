@@ -340,8 +340,11 @@ class BehaviouralLeontiefOutputWriter:
         node_comparison: pd.DataFrame,
         summary: pd.DataFrame,
     ) -> dict[str, object]:
-        self.paths.behavioural_leontief_outputs_dir.mkdir(parents=True, exist_ok=True)
-        self.paths.behavioural_leontief_diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        self.paths.leontief_behavioural_outputs_dir.mkdir(parents=True, exist_ok=True)
+        self.paths.leontief_behavioural_summary_diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        self.paths.leontief_behavioural_rounds_diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        self.paths.leontief_behavioural_node_comparison_diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        self.paths.leontief_behavioural_node_rounds_diagnostics_dir.mkdir(parents=True, exist_ok=True)
         orientation = year_data.input_panel_orientation
         output_path = self.paths.behavioural_leontief_output_path(year_data.year, year_data.mode, orientation)
         summary_path = self.paths.behavioural_leontief_summary_path(year_data.year, year_data.mode, orientation)

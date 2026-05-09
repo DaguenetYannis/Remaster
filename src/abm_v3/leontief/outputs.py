@@ -23,8 +23,10 @@ class LeontiefOutputWriter:
         summary: pd.DataFrame,
     ) -> dict[str, object]:
         """Write the full diagnostic bundle for one year."""
-        self.paths.leontief_outputs_dir.mkdir(parents=True, exist_ok=True)
-        self.paths.leontief_diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        self.paths.leontief_pure_outputs_dir.mkdir(parents=True, exist_ok=True)
+        self.paths.leontief_pure_propagation_diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        self.paths.leontief_pure_viability_diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        self.paths.leontief_pure_mode_comparison_diagnostics_dir.mkdir(parents=True, exist_ok=True)
 
         orientation = year_data.input_panel_orientation
         iterative_output_path = self.paths.leontief_iterative_output_path(year_data.year, year_data.mode, orientation)
@@ -74,7 +76,7 @@ class LeontiefOutputWriter:
 
     def write_viability(self, diagnostics: LeontiefViabilityDiagnostics) -> dict[str, object]:
         """Write coefficient viability diagnostics for one year."""
-        self.paths.leontief_diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        self.paths.leontief_pure_viability_diagnostics_dir.mkdir(parents=True, exist_ok=True)
         mode = self._diagnostic_mode(diagnostics)
         orientation = self._diagnostic_input_panel_orientation(diagnostics)
         summary_path = self.paths.leontief_viability_summary_path(diagnostics.year, mode, orientation)
@@ -102,7 +104,7 @@ class LeontiefOutputWriter:
 
     def write_orientation_audit(self, year: int, audit: OrientationAuditResult) -> dict[str, object]:
         """Write orientation audit summary and node-level diagnostics."""
-        self.paths.leontief_diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        self.paths.leontief_pure_orientation_audit_diagnostics_dir.mkdir(parents=True, exist_ok=True)
         summary_path = self.paths.leontief_orientation_summary_path(year)
         node_comparison_path = self.paths.leontief_orientation_node_comparison_path(year)
         suspicious_nodes_path = self.paths.leontief_orientation_suspicious_nodes_path(year)

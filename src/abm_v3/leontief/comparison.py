@@ -41,7 +41,7 @@ class LeontiefModeComparator:
             writer.write_all(year_data, result, node_comparison, propagation_summary)
             rows.append(self._comparison_row(year, mode, viability.summary, propagation_summary, result, year_data.mode_diagnostics))
         comparison = pd.DataFrame(rows)
-        self.paths.leontief_diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        self.paths.leontief_pure_mode_comparison_diagnostics_dir.mkdir(parents=True, exist_ok=True)
         comparison.to_csv(self.paths.leontief_mode_comparison_path(year), index=False)
         return comparison
 

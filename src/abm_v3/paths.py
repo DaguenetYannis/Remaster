@@ -91,10 +91,31 @@ class ABMV3Paths:
             )
         raise ValueError(f"Unknown input panel orientation: {input_panel_orientation}")
 
-    def _mode_suffix(self, mode: str, input_panel_orientation: str | None = None) -> str:
+    def format_leontief_suffix(
+        self,
+        year: int,
+        mode: str,
+        input_panel_orientation: str | None = None,
+    ) -> str:
+        """Build a readable single-year suffix for Leontief artifacts."""
         if input_panel_orientation is None:
-            return mode
-        return f"{mode}_{input_panel_orientation}"
+            return f"{year}_{mode}"
+        return f"{year}_{mode}__{input_panel_orientation}"
+
+    def format_leontief_range_suffix(
+        self,
+        start_year: int,
+        end_year: int,
+        mode: str | None = None,
+        input_panel_orientation: str | None = None,
+    ) -> str:
+        """Build a readable range suffix for Leontief summary artifacts."""
+        year_part = f"{start_year}_{end_year}"
+        if mode is None:
+            return year_part
+        if input_panel_orientation is None:
+            return f"{year_part}_{mode}"
+        return f"{year_part}_{mode}__{input_panel_orientation}"
 
     @property
     def leontief_dir(self) -> Path:
@@ -102,11 +123,39 @@ class ABMV3Paths:
 
     @property
     def leontief_outputs_dir(self) -> Path:
-        return self.leontief_dir / "outputs"
+        return self.leontief_pure_outputs_dir
 
     @property
     def leontief_diagnostics_dir(self) -> Path:
-        return self.leontief_dir / "diagnostics"
+        return self.leontief_pure_propagation_diagnostics_dir
+
+    @property
+    def leontief_pure_dir(self) -> Path:
+        return self.leontief_dir / "pure"
+
+    @property
+    def leontief_pure_outputs_dir(self) -> Path:
+        return self.leontief_pure_dir / "outputs"
+
+    @property
+    def leontief_pure_diagnostics_dir(self) -> Path:
+        return self.leontief_pure_dir / "diagnostics"
+
+    @property
+    def leontief_pure_propagation_diagnostics_dir(self) -> Path:
+        return self.leontief_pure_diagnostics_dir / "propagation"
+
+    @property
+    def leontief_pure_viability_diagnostics_dir(self) -> Path:
+        return self.leontief_pure_diagnostics_dir / "viability"
+
+    @property
+    def leontief_pure_mode_comparison_diagnostics_dir(self) -> Path:
+        return self.leontief_pure_diagnostics_dir / "mode_comparison"
+
+    @property
+    def leontief_pure_orientation_audit_diagnostics_dir(self) -> Path:
+        return self.leontief_pure_diagnostics_dir / "orientation_audit"
 
     def leontief_iterative_output_path(
         self,
@@ -114,88 +163,148 @@ class ABMV3Paths:
         mode: str = "raw",
         input_panel_orientation: str | None = None,
     ) -> Path:
-        return self.leontief_outputs_dir / f"leontief_iterative_output_{year}_{self._mode_suffix(mode, input_panel_orientation)}.parquet"
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.leontief_pure_outputs_dir / f"iterative_output_{suffix}.parquet"
 
     def leontief_summary_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_propagation_summary_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.leontief_pure_propagation_diagnostics_dir / f"summary_{suffix}.csv"
 
     def leontief_node_comparison_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_node_comparison_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.leontief_pure_propagation_diagnostics_dir / f"node_comparison_{suffix}.csv"
 
     def leontief_rounds_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_rounds_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.leontief_pure_propagation_diagnostics_dir / f"rounds_{suffix}.csv"
 
     def leontief_invalid_output_columns_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_invalid_output_columns_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.leontief_pure_viability_diagnostics_dir / f"invalid_output_columns_{suffix}.csv"
 
     def leontief_viability_summary_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_coefficient_viability_summary_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.leontief_pure_viability_diagnostics_dir / f"summary_{suffix}.csv"
 
     def leontief_viability_columns_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_coefficient_viability_columns_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.leontief_pure_viability_diagnostics_dir / f"columns_{suffix}.csv"
 
     def leontief_negative_flows_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_negative_flows_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.leontief_pure_viability_diagnostics_dir / f"negative_flows_{suffix}.csv"
 
     def leontief_spectral_diagnostics_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_spectral_diagnostics_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.leontief_pure_viability_diagnostics_dir / f"spectral_diagnostics_{suffix}.csv"
 
     def leontief_top_unstable_nodes_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_top_unstable_nodes_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.leontief_pure_viability_diagnostics_dir / f"top_unstable_nodes_{suffix}.csv"
 
     def leontief_mode_diagnostics_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_mode_diagnostics_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.leontief_pure_mode_comparison_diagnostics_dir / f"mode_diagnostics_{suffix}.csv"
 
     def leontief_excluded_fd_columns_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_excluded_fd_columns_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.leontief_pure_mode_comparison_diagnostics_dir / f"excluded_fd_columns_{suffix}.csv"
 
     def leontief_rescaled_columns_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_rescaled_columns_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.leontief_pure_mode_comparison_diagnostics_dir / f"rescaled_columns_{suffix}.csv"
 
     def leontief_mode_comparison_path(self, year: int) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_mode_comparison_{year}.csv"
+        return self.leontief_pure_mode_comparison_diagnostics_dir / f"summary_{year}.csv"
 
     def leontief_mode_comparison_range_path(self, start_year: int, end_year: int) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_mode_comparison_{start_year}_{end_year}.csv"
+        suffix = self.format_leontief_range_suffix(start_year, end_year)
+        return self.leontief_pure_mode_comparison_diagnostics_dir / f"summary_{suffix}.csv"
 
     def leontief_orientation_summary_path(self, year: int) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_orientation_summary_{year}.csv"
+        return self.leontief_pure_orientation_audit_diagnostics_dir / f"summary_{year}.csv"
 
     def leontief_orientation_node_comparison_path(self, year: int) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_orientation_node_comparison_{year}.csv"
+        return self.leontief_pure_orientation_audit_diagnostics_dir / f"node_comparison_{year}.csv"
 
     def leontief_orientation_suspicious_nodes_path(self, year: int) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_orientation_suspicious_nodes_{year}.csv"
+        return self.leontief_pure_orientation_audit_diagnostics_dir / f"suspicious_nodes_{year}.csv"
 
     def leontief_orientation_summary_range_path(self, start_year: int, end_year: int) -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_orientation_summary_{start_year}_{end_year}.csv"
+        suffix = self.format_leontief_range_suffix(start_year, end_year)
+        return self.leontief_pure_orientation_audit_diagnostics_dir / f"summary_{suffix}.csv"
 
     @property
     def behavioural_leontief_dir(self) -> Path:
         return self.leontief_dir / "behavioural"
 
     @property
-    def behavioural_leontief_outputs_dir(self) -> Path:
+    def leontief_behavioural_outputs_dir(self) -> Path:
         return self.behavioural_leontief_dir / "outputs"
 
     @property
-    def behavioural_leontief_diagnostics_dir(self) -> Path:
+    def leontief_behavioural_diagnostics_dir(self) -> Path:
         return self.behavioural_leontief_dir / "diagnostics"
 
+    @property
+    def leontief_behavioural_summary_diagnostics_dir(self) -> Path:
+        return self.leontief_behavioural_diagnostics_dir / "summary"
+
+    @property
+    def leontief_behavioural_rounds_diagnostics_dir(self) -> Path:
+        return self.leontief_behavioural_diagnostics_dir / "rounds"
+
+    @property
+    def leontief_behavioural_node_comparison_diagnostics_dir(self) -> Path:
+        return self.leontief_behavioural_diagnostics_dir / "node_comparison"
+
+    @property
+    def leontief_behavioural_node_rounds_diagnostics_dir(self) -> Path:
+        return self.leontief_behavioural_diagnostics_dir / "node_rounds"
+
+    @property
+    def behavioural_leontief_outputs_dir(self) -> Path:
+        return self.leontief_behavioural_outputs_dir
+
+    @property
+    def behavioural_leontief_diagnostics_dir(self) -> Path:
+        return self.leontief_behavioural_diagnostics_dir
+
+    @property
+    def leontief_comparisons_dir(self) -> Path:
+        return self.leontief_dir / "comparisons"
+
+    @property
+    def leontief_pure_vs_behavioural_comparisons_dir(self) -> Path:
+        return self.leontief_comparisons_dir / "pure_vs_behavioural"
+
+    @property
+    def leontief_current_vs_corrected_orientation_comparisons_dir(self) -> Path:
+        return self.leontief_comparisons_dir / "current_vs_corrected_orientation"
+
+    @property
+    def leontief_yearly_summaries_comparisons_dir(self) -> Path:
+        return self.leontief_comparisons_dir / "yearly_summaries"
+
     def behavioural_leontief_output_path(self, year: int, mode: str = "fd_without_inventory", input_panel_orientation: str | None = None) -> Path:
-        return self.behavioural_leontief_outputs_dir / f"behavioural_leontief_output_{year}_{self._mode_suffix(mode, input_panel_orientation)}.parquet"
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.leontief_behavioural_outputs_dir / f"output_{suffix}.parquet"
 
     def behavioural_leontief_summary_path(self, year: int, mode: str = "fd_without_inventory", input_panel_orientation: str | None = None) -> Path:
-        return self.behavioural_leontief_diagnostics_dir / f"behavioural_leontief_summary_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.leontief_behavioural_summary_diagnostics_dir / f"summary_{suffix}.csv"
 
     def behavioural_leontief_node_comparison_path(self, year: int, mode: str = "fd_without_inventory", input_panel_orientation: str | None = None) -> Path:
-        return self.behavioural_leontief_diagnostics_dir / f"behavioural_leontief_node_comparison_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.leontief_behavioural_node_comparison_diagnostics_dir / f"node_comparison_{suffix}.csv"
 
     def behavioural_leontief_rounds_path(self, year: int, mode: str = "fd_without_inventory", input_panel_orientation: str | None = None) -> Path:
-        return self.behavioural_leontief_diagnostics_dir / f"behavioural_leontief_rounds_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.leontief_behavioural_rounds_diagnostics_dir / f"rounds_{suffix}.csv"
 
     def behavioural_leontief_node_rounds_path(self, year: int, mode: str = "fd_without_inventory", input_panel_orientation: str | None = None) -> Path:
-        return self.behavioural_leontief_diagnostics_dir / f"behavioural_leontief_node_rounds_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.leontief_behavioural_node_rounds_diagnostics_dir / f"node_rounds_{suffix}.csv"
 
     def metric_file(self, year: int, metric_name: str) -> Path:
         return self.metrics_root / str(year) / f"{metric_name}_{year}.parquet"
