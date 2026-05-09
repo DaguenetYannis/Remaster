@@ -8,6 +8,7 @@ from src.abm_v3.leontief.behavioural import (
 )
 from src.abm_v3.leontief.coefficients import LeontiefCoefficientBuilder, LeontiefYearData
 from src.abm_v3.leontief.comparison import LeontiefModeComparator
+from src.abm_v3.leontief.orientation import LeontiefOrientationAuditor, OrientationAuditResult
 from src.abm_v3.leontief.outputs import LeontiefOutputWriter
 from src.abm_v3.leontief.propagation import LeontiefPropagationEngine, LeontiefPropagationResult
 from src.abm_v3.leontief.validation import LeontiefPropagationValidator
@@ -20,6 +21,7 @@ __all__ = [
     "BehaviouralLeontiefResult",
     "BehaviouralLeontiefValidator",
     "LeontiefModeComparator",
+    "LeontiefOrientationAuditor",
     "LeontiefOutputWriter",
     "LeontiefPropagationEngine",
     "LeontiefPropagationResult",
@@ -27,4 +29,5 @@ __all__ = [
     "LeontiefViabilityAnalyzer",
     "LeontiefViabilityDiagnostics",
     "LeontiefYearData",
+    "OrientationAuditResult",
 ]

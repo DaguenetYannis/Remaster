@@ -120,6 +120,18 @@ class ABMV3Paths:
     def leontief_mode_comparison_range_path(self, start_year: int, end_year: int) -> Path:
         return self.leontief_diagnostics_dir / f"leontief_mode_comparison_{start_year}_{end_year}.csv"
 
+    def leontief_orientation_summary_path(self, year: int) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_orientation_summary_{year}.csv"
+
+    def leontief_orientation_node_comparison_path(self, year: int) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_orientation_node_comparison_{year}.csv"
+
+    def leontief_orientation_suspicious_nodes_path(self, year: int) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_orientation_suspicious_nodes_{year}.csv"
+
+    def leontief_orientation_summary_range_path(self, start_year: int, end_year: int) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_orientation_summary_{start_year}_{end_year}.csv"
+
     @property
     def behavioural_leontief_dir(self) -> Path:
         return self.leontief_dir / "behavioural"

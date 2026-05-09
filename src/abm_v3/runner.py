@@ -17,6 +17,7 @@ from src.abm_v3.leontief.behavioural import (
 )
 from src.abm_v3.leontief.coefficients import LeontiefCoefficientBuilder
 from src.abm_v3.leontief.comparison import LeontiefModeComparator
+from src.abm_v3.leontief.orientation import LeontiefOrientationAuditor
 from src.abm_v3.leontief.outputs import LeontiefOutputWriter
 from src.abm_v3.leontief.propagation import LeontiefPropagationEngine
 from src.abm_v3.leontief.validation import LeontiefPropagationValidator
@@ -107,6 +108,31 @@ def build_parser() -> argparse.ArgumentParser:
     leontief_compare_modes_range.add_argument("--tolerance", type=float, default=None)
     leontief_compare_modes_range.add_argument("--max-rounds", type=int, default=None)
     leontief_compare_modes_range.add_argument("--column-sum-cap", type=float, default=None)
+
+    leontief_audit_orientation = subparsers.add_parser("leontief-audit-orientation")
+    leontief_audit_orientation.add_argument("--year", type=int, required=True)
+    leontief_audit_orientation.add_argument("--max-rounds", type=int, default=400)
+    leontief_audit_orientation.add_argument("--tolerance", type=float, default=1e-8)
+    leontief_audit_orientation.add_argument("--spectral-max-iter", type=int, default=None)
+    leontief_audit_orientation.add_argument(
+        "--include-fd-without-inventory",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    leontief_audit_orientation.add_argument("--reference", choices=["abm_ready", "current"], default="abm_ready")
+
+    leontief_audit_orientation_range = subparsers.add_parser("leontief-audit-orientation-range")
+    leontief_audit_orientation_range.add_argument("--start-year", type=int, required=True)
+    leontief_audit_orientation_range.add_argument("--end-year", type=int, required=True)
+    leontief_audit_orientation_range.add_argument("--max-rounds", type=int, default=400)
+    leontief_audit_orientation_range.add_argument("--tolerance", type=float, default=1e-8)
+    leontief_audit_orientation_range.add_argument("--spectral-max-iter", type=int, default=None)
+    leontief_audit_orientation_range.add_argument(
+        "--include-fd-without-inventory",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    leontief_audit_orientation_range.add_argument("--reference", choices=["abm_ready", "current"], default="abm_ready")
 
     behavioural_leontief = subparsers.add_parser("behavioural-leontief")
     behavioural_leontief.add_argument("--year", type=int, required=True)
@@ -223,6 +249,41 @@ def run_leontief_mode_comparison(
         )
     print(f"[ABM v3 Leontief] Wrote mode comparison to {active_paths.leontief_mode_comparison_path(year)}")
     return comparison
+
+
+def run_leontief_orientation_audit(
+    year: int,
+    paths: ABMV3Paths | None = None,
+    config: ABMV3Config | None = None,
+    max_rounds: int = 400,
+    tolerance: float = 1e-8,
+    include_fd_without_inventory: bool = True,
+    reference: str = "abm_ready",
+    spectral_max_iter: int | None = None,
+) -> dict[str, object]:
+    """Run and write the Eora T orientation audit for one year."""
+    active_paths = paths or ABMV3Paths()
+    active_config = config or ABMV3Config()
+    print(f"[ABM v3 Leontief] Auditing T orientation for {year}")
+    audit = LeontiefOrientationAuditor(active_paths, active_config).audit_year(
+        year=year,
+        max_rounds=max_rounds,
+        tolerance=tolerance,
+        include_fd_without_inventory=include_fd_without_inventory,
+        reference=reference,
+        spectral_max_iter=spectral_max_iter,
+    )
+    written_paths = LeontiefOutputWriter(active_paths).write_orientation_audit(year, audit)
+    for row in audit.summary.to_dict("records"):
+        print(
+            "[ABM v3 Leontief] "
+            f"mode={row['orientation_mode']}, "
+            f"rho={row['spectral_radius_A']:.12g}, "
+            f"rel_error={row['relative_error_total']:.12g}, "
+            f"converged={row['converged']}"
+        )
+    print(f"[ABM v3 Leontief] Wrote orientation audit to {written_paths['summary']}")
+    return {"audit": audit, "written_paths": written_paths}
 
 
 def build_leontief_config(args: argparse.Namespace) -> ABMV3Config:
@@ -413,6 +474,37 @@ def main() -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         combined.to_csv(output_path, index=False)
         print(f"[ABM v3 Leontief] Wrote range mode comparison to {output_path}")
+    elif args.command == "leontief-audit-orientation":
+        run_leontief_orientation_audit(
+            args.year,
+            paths=ABMV3Paths(),
+            config=ABMV3Config(),
+            max_rounds=args.max_rounds,
+            tolerance=args.tolerance,
+            include_fd_without_inventory=args.include_fd_without_inventory,
+            reference=args.reference,
+            spectral_max_iter=args.spectral_max_iter,
+        )
+    elif args.command == "leontief-audit-orientation-range":
+        summaries = []
+        for year in range(args.start_year, args.end_year + 1):
+            print(f"[ABM v3 Leontief] Orientation audit range progress: year={year}")
+            output = run_leontief_orientation_audit(
+                year,
+                paths=ABMV3Paths(),
+                config=ABMV3Config(),
+                max_rounds=args.max_rounds,
+                tolerance=args.tolerance,
+                include_fd_without_inventory=args.include_fd_without_inventory,
+                reference=args.reference,
+                spectral_max_iter=args.spectral_max_iter,
+            )
+            summaries.append(output["audit"].summary)
+        combined = pd.concat(summaries, ignore_index=True) if summaries else pd.DataFrame()
+        output_path = ABMV3Paths().leontief_orientation_summary_range_path(args.start_year, args.end_year)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        combined.to_csv(output_path, index=False)
+        print(f"[ABM v3 Leontief] Wrote range orientation audit to {output_path}")
     elif args.command == "behavioural-leontief":
         run_behavioural_leontief_year(
             args.year,

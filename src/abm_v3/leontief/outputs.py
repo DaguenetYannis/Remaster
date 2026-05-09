@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from src.abm_v3.leontief.coefficients import LeontiefYearData
+from src.abm_v3.leontief.orientation import OrientationAuditResult
 from src.abm_v3.leontief.propagation import LeontiefPropagationResult
 from src.abm_v3.leontief.viability import LeontiefViabilityDiagnostics
 from src.abm_v3.paths import ABMV3Paths
@@ -95,6 +96,21 @@ class LeontiefOutputWriter:
             "negative_flows": negative_flows_path,
             "spectral": spectral_path,
             "top_unstable_nodes": top_nodes_path,
+        }
+
+    def write_orientation_audit(self, year: int, audit: OrientationAuditResult) -> dict[str, object]:
+        """Write orientation audit summary and node-level diagnostics."""
+        self.paths.leontief_diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = self.paths.leontief_orientation_summary_path(year)
+        node_comparison_path = self.paths.leontief_orientation_node_comparison_path(year)
+        suspicious_nodes_path = self.paths.leontief_orientation_suspicious_nodes_path(year)
+        audit.summary.to_csv(summary_path, index=False)
+        audit.node_comparison.to_csv(node_comparison_path, index=False)
+        audit.suspicious_nodes.to_csv(suspicious_nodes_path, index=False)
+        return {
+            "summary": summary_path,
+            "node_comparison": node_comparison_path,
+            "suspicious_nodes": suspicious_nodes_path,
         }
 
     def _write_optional_frame(self, frame: pd.DataFrame | None, path: object) -> None:
