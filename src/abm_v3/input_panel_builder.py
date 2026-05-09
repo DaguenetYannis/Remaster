@@ -14,6 +14,8 @@ from src.abm_v3.paths import ABMV3Paths
 
 LOGGER = logging.getLogger(__name__)
 
+CORRECTED_ORIENTATION = "transpose_row_fd_without_inventory"
+
 
 ACCOUNTING_COLUMNS = [
     "intermediate_output",
@@ -568,3 +570,494 @@ class ABMV3InputPanelBuilder:
             "global_fallback_share",
             "missing_feasibility_share",
         ]
+
+
+@dataclass
+class CorrectedOrientationInputPanelBuilder(ABMV3InputPanelBuilder):
+    """Build an experimental ABM-ready panel with corrected Eora orientation.
+
+    This builder is intentionally side-by-side with the current input panel. It
+    does not change the canonical current-column convention used by
+    ``ABMV3InputPanelBuilder``.
+    """
+
+    orientation: str = CORRECTED_ORIENTATION
+
+    def output_path(self, start_year: int, end_year: int) -> Path:
+        return self.paths.abm_v3_corrected_historical_panel_file(start_year, end_year, self.orientation)
+
+    def build(self, start_year: int = 1995, end_year: int = 2016, overwrite: bool = False) -> pd.DataFrame:
+        """Build and write the corrected-orientation panel plus diagnostics."""
+        self._validate_orientation()
+        output_path = self.output_path(start_year, end_year)
+        if output_path.exists() and not overwrite:
+            LOGGER.info("Corrected ABM v3 input panel already exists at %s", output_path)
+            return pd.read_parquet(output_path)
+
+        metrics_panel = self._load_metrics_panel()
+        if not metrics_panel.empty:
+            metrics_panel = self._canonicalize_metrics_panel(metrics_panel)
+            if "Year" in metrics_panel.columns:
+                metrics_panel = metrics_panel[
+                    (metrics_panel["Year"] >= start_year) & (metrics_panel["Year"] <= end_year)
+                ].copy()
+
+        year_panels: list[pd.DataFrame] = []
+        build_report_rows: list[dict[str, object]] = []
+        excluded_fd_rows: list[pd.DataFrame] = []
+
+        for year in range(start_year, end_year + 1):
+            try:
+                accounting_panel, accounting_report, excluded_fd_columns = self.build_year_corrected_accounting_panel(year)
+            except FileNotFoundError as error:
+                LOGGER.warning("Skipping %s because a raw matrix or label file is missing: %s", year, error)
+                build_report_rows.append(self._corrected_missing_year_report(year, str(error)))
+                continue
+            except ValueError as error:
+                LOGGER.warning("Skipping %s because corrected accounting could not be built: %s", year, error)
+                build_report_rows.append(self._corrected_failed_year_report(year, str(error)))
+                continue
+
+            merged_panel = self.merge_with_metrics(accounting_panel, metrics_panel)
+            merged_panel, negative_report = self.handle_negative_accounting_values(merged_panel)
+            merged_panel = self.add_input_intensity_features(merged_panel)
+            merged_panel = self.add_required_aliases(merged_panel)
+            merged_panel["input_panel_orientation"] = self.orientation
+            merged_panel["final_demand_inventory_adjustment"] = "inventory_fd_columns_excluded"
+            merged_panel["EI_source_note"] = self._ei_source_note(merged_panel)
+            year_panels.append(merged_panel)
+            excluded_fd_rows.append(excluded_fd_columns)
+            build_report_rows.append(
+                {
+                    **accounting_report,
+                    **negative_report,
+                    "missing_EI_count": int(merged_panel["EI"].isna().sum()) if "EI" in merged_panel.columns else len(merged_panel),
+                    "negative_EI_count": int((pd.to_numeric(merged_panel.get("EI", pd.Series(dtype=float)), errors="coerce") < 0).sum())
+                    if "EI" in merged_panel.columns
+                    else 0,
+                    "unmatched_merged_labels_count": int((~merged_panel["_metrics_matched"].eq(True)).sum())
+                    if "_metrics_matched" in merged_panel.columns
+                    else len(merged_panel),
+                }
+            )
+
+        panel = pd.concat(year_panels, ignore_index=True) if year_panels else pd.DataFrame()
+        if "_metrics_matched" in panel.columns:
+            panel = panel.drop(columns=["_metrics_matched"])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        panel.to_parquet(output_path, index=False)
+
+        build_report = pd.DataFrame(build_report_rows)
+        excluded_fd = pd.concat(excluded_fd_rows, ignore_index=True) if excluded_fd_rows else self._empty_excluded_fd_columns()
+        self.write_corrected_build_report(build_report, start_year, end_year)
+        self.write_corrected_orientation_comparison(panel, start_year, end_year)
+        self.write_corrected_node_comparison(panel, start_year, end_year)
+        self.write_excluded_inventory_fd_columns(excluded_fd, start_year, end_year)
+        self.write_corrected_column_dictionary()
+        self.write_corrected_negative_ei_rows(panel, start_year, end_year)
+        self.write_corrected_input_intensity_summary(panel, start_year, end_year)
+        LOGGER.info("Built corrected ABM v3 input panel with %s rows at %s", len(panel), output_path)
+        return panel
+
+    def build_year_corrected_accounting_panel(
+        self,
+        year: int,
+    ) -> tuple[pd.DataFrame, dict[str, object], pd.DataFrame]:
+        """Build one year's corrected orientation accounting panel."""
+        matrix_dir = self.paths.parquet_root / str(year)
+        t_path = matrix_dir / "T.parquet"
+        fd_path = matrix_dir / "FD.parquet"
+        labels_t_path = self.paths.raw_root / str(year) / "labels_T.txt"
+        labels_fd_path = self.paths.raw_root / str(year) / "labels_FD.txt"
+        missing = [str(path) for path in [t_path, fd_path, labels_t_path] if not path.exists()]
+        if missing:
+            raise FileNotFoundError("; ".join(missing))
+
+        labels = self.load_labels_T(year)
+        label_parts = self.split_country_sector_labels(labels)
+        t_matrix = pd.read_parquet(t_path)
+        fd_matrix = pd.read_parquet(fd_path)
+        if len(labels) != len(t_matrix.index) or len(labels) != len(t_matrix.columns) or len(labels) != len(fd_matrix.index):
+            raise ValueError(
+                f"Label count {len(labels)} does not match T/FD dimensions for year {year}: "
+                f"T={t_matrix.shape}, FD={fd_matrix.shape}"
+            )
+
+        t_matrix = t_matrix.copy()
+        fd_matrix = fd_matrix.copy()
+        t_matrix.index = labels
+        t_matrix.columns = labels
+        fd_matrix.index = labels
+        fd_labels = self.load_labels_FD(year, fd_matrix, labels_fd_path)
+        fd_matrix.columns = fd_labels
+
+        inventory_mask = self.inventory_fd_column_mask(fd_labels)
+        fd_no_inventory = fd_matrix.loc[:, ~inventory_mask].copy()
+        excluded_fd_columns = self.build_excluded_inventory_fd_columns(year, fd_matrix, inventory_mask)
+
+        row_sum_t = t_matrix.sum(axis=1)
+        column_sum_t = t_matrix.sum(axis=0)
+        y_raw = fd_matrix.sum(axis=1)
+        y_no_inventory = fd_no_inventory.sum(axis=1)
+        x_raw_current = column_sum_t + y_raw
+        x_row_raw = row_sum_t + y_raw
+        x_row_no_inventory = row_sum_t + y_no_inventory
+        x_column_no_inventory = column_sum_t + y_no_inventory
+
+        result = label_parts.copy()
+        result["Year"] = year
+        result["input_panel_orientation"] = self.orientation
+        result["intermediate_output"] = row_sum_t.to_numpy(dtype=float)
+        result["intermediate_demand"] = row_sum_t.to_numpy(dtype=float)
+        result["intermediate_input_use"] = column_sum_t.to_numpy(dtype=float)
+        result["final_demand_total_raw"] = y_raw.to_numpy(dtype=float)
+        result["final_demand_total"] = y_no_inventory.to_numpy(dtype=float)
+        result["Y_raw"] = y_raw.to_numpy(dtype=float)
+        result["Y_no_inventory"] = y_no_inventory.to_numpy(dtype=float)
+        result["X_raw_current_convention"] = x_raw_current.to_numpy(dtype=float)
+        result["X_row_raw"] = x_row_raw.to_numpy(dtype=float)
+        result["X_row_no_inventory"] = x_row_no_inventory.to_numpy(dtype=float)
+        result["X_column_no_inventory"] = x_column_no_inventory.to_numpy(dtype=float)
+        result["X_corrected"] = x_row_no_inventory.to_numpy(dtype=float)
+        result["M_corrected"] = column_sum_t.to_numpy(dtype=float)
+        result["D_proxy_corrected"] = x_row_no_inventory.to_numpy(dtype=float)
+        result["X_observed"] = result["X_corrected"]
+        result["D_proxy_observed"] = result["D_proxy_corrected"]
+        result["M_observed"] = result["M_corrected"]
+        result["X"] = result["X_corrected"]
+        result["D"] = result["D_proxy_corrected"]
+        result["M"] = result["M_corrected"]
+        result["available_inputs"] = result["M_corrected"]
+        capacity_margin = float(self.config.calibration.capacity_margin)
+        inventory_days = float(self.config.calibration.inventory_days)
+        result["K"] = capacity_margin * result["X_corrected"]
+        result["I"] = inventory_days * result["M_corrected"] / 365.0
+        result["capacity_margin_used"] = capacity_margin
+        result["inventory_days_used"] = inventory_days
+
+        raw_fd_values = fd_matrix.to_numpy(dtype=float, copy=False)
+        no_inventory_fd_values = fd_no_inventory.to_numpy(dtype=float, copy=False)
+        x_corrected_values = result["X_corrected"].to_numpy(dtype=float)
+        report = {
+            "Year": year,
+            "row_count": len(result),
+            "T_total": float(t_matrix.to_numpy(dtype=float, copy=False).sum()),
+            "FD_raw_total": float(raw_fd_values.sum()),
+            "FD_no_inventory_total": float(no_inventory_fd_values.sum()) if no_inventory_fd_values.size else 0.0,
+            "inventory_excluded_column_count": int(inventory_mask.sum()),
+            "inventory_excluded_total": float(fd_matrix.loc[:, inventory_mask].to_numpy(dtype=float).sum()) if inventory_mask.any() else 0.0,
+            "X_current_total": float(np.nansum(x_raw_current.to_numpy(dtype=float))),
+            "X_corrected_total": float(np.nansum(x_corrected_values)),
+            "M_current_total": float(np.nansum(column_sum_t.to_numpy(dtype=float))),
+            "M_corrected_total": float(np.nansum(column_sum_t.to_numpy(dtype=float))),
+            "non_positive_X_corrected_count": int((np.isfinite(x_corrected_values) & (x_corrected_values <= 0.0)).sum()),
+            "negative_X_corrected_count": int((np.isfinite(x_corrected_values) & (x_corrected_values < 0.0)).sum()),
+            "near_zero_X_corrected_count": int(((x_corrected_values > 0.0) & (x_corrected_values <= 1e-6)).sum()),
+            "negative_Y_no_inventory_count": int((y_no_inventory.to_numpy(dtype=float) < 0.0).sum()),
+            "negative_FD_raw_entries": int((np.isfinite(raw_fd_values) & (raw_fd_values < 0.0)).sum()),
+            "negative_FD_no_inventory_entries": int((np.isfinite(no_inventory_fd_values) & (no_inventory_fd_values < 0.0)).sum()),
+            "notes": "X_corrected=T.sum(axis=1)+FD_no_inventory.sum(axis=1); M_corrected=T.sum(axis=0).",
+        }
+        return result, report, excluded_fd_columns
+
+    def load_labels_FD(self, year: int, fd_matrix: pd.DataFrame, labels_fd_path: Path | None = None) -> list[str]:
+        """Load FD labels when available, otherwise use parquet column labels."""
+        path = labels_fd_path or self.paths.raw_root / str(year) / "labels_FD.txt"
+        if not path.exists():
+            LOGGER.warning("labels_FD missing for %s; using FD parquet columns.", year)
+            return [str(column) for column in fd_matrix.columns]
+        labels = []
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            parts = [part.strip() for part in line.split("\t") if part.strip()]
+            labels.append(" | ".join(parts))
+        if len(labels) != fd_matrix.shape[1]:
+            LOGGER.warning(
+                "labels_FD count %s does not match FD columns for %s; using FD parquet columns.",
+                len(labels),
+                year,
+            )
+            return [str(column) for column in fd_matrix.columns]
+        return labels
+
+    def inventory_fd_column_mask(self, fd_labels: list[object]) -> np.ndarray:
+        """Flag inventory-change final demand columns by configured patterns."""
+        patterns = tuple(pattern.lower() for pattern in self.config.leontief.inventory_label_patterns)
+        return np.array(
+            [any(pattern in str(label).lower() for pattern in patterns) for label in fd_labels],
+            dtype=bool,
+        )
+
+    def build_excluded_inventory_fd_columns(
+        self,
+        year: int,
+        fd_matrix: pd.DataFrame,
+        inventory_mask: np.ndarray,
+    ) -> pd.DataFrame:
+        """Record excluded inventory FD columns for auditability."""
+        rows = []
+        for column_index, column_label in enumerate(fd_matrix.columns):
+            if not bool(inventory_mask[column_index]):
+                continue
+            values = fd_matrix.iloc[:, column_index].to_numpy(dtype=float)
+            rows.append(
+                {
+                    "Year": year,
+                    "fd_column_label": str(column_label),
+                    "excluded_reason": "matched inventory final-demand pattern",
+                    "column_total": float(np.nansum(values)),
+                    "negative_entry_count": int((np.isfinite(values) & (values < 0.0)).sum()),
+                    "min_value": float(np.nanmin(values)) if len(values) else np.nan,
+                    "max_value": float(np.nanmax(values)) if len(values) else np.nan,
+                }
+            )
+        return pd.DataFrame(rows, columns=self._excluded_fd_columns())
+
+    def write_corrected_build_report(self, report: pd.DataFrame, start_year: int, end_year: int) -> Path:
+        return ABMV3OutputWriter(self.paths).write_dataframe(
+            report,
+            "diagnostics",
+            f"abm_v3_input_panel_build_report_{start_year}_{end_year}_{self.orientation}.csv",
+        )
+
+    def write_corrected_orientation_comparison(self, corrected_panel: pd.DataFrame, start_year: int, end_year: int) -> Path:
+        comparison = self.build_orientation_comparison(corrected_panel, start_year, end_year)
+        return ABMV3OutputWriter(self.paths).write_dataframe(
+            comparison,
+            "diagnostics",
+            f"abm_v3_input_panel_orientation_comparison_{start_year}_{end_year}.csv",
+        )
+
+    def write_corrected_node_comparison(self, corrected_panel: pd.DataFrame, start_year: int, end_year: int) -> Path:
+        node_comparison = self.build_orientation_node_comparison(corrected_panel, start_year, end_year)
+        return ABMV3OutputWriter(self.paths).write_dataframe(
+            node_comparison,
+            "diagnostics",
+            f"abm_v3_input_panel_orientation_node_comparison_{start_year}_{end_year}.csv",
+        )
+
+    def write_excluded_inventory_fd_columns(self, excluded_fd_columns: pd.DataFrame, start_year: int, end_year: int) -> Path:
+        return ABMV3OutputWriter(self.paths).write_dataframe(
+            excluded_fd_columns.reindex(columns=self._excluded_fd_columns()),
+            "diagnostics",
+            f"abm_v3_excluded_inventory_fd_columns_{start_year}_{end_year}.csv",
+        )
+
+    def write_corrected_column_dictionary(self) -> Path:
+        rows = [
+            ("input_panel_orientation", "Experimental orientation identifier.", self.orientation, "diagnostic", "Default ABM panel is unchanged."),
+            ("X_corrected", "Corrected observed production scale.", "T.sum(axis=1)+FD_no_inventory.sum(axis=1)", "observed/experimental", "Row-output with inventory-adjusted final demand."),
+            ("M_corrected", "Corrected input-use proxy.", "T.sum(axis=0)", "proxy/experimental", "Column sums interpreted as input-facing use."),
+            ("D_proxy_corrected", "Corrected demand proxy.", "T.sum(axis=1)+FD_no_inventory.sum(axis=1)", "proxy/experimental", "Numerically equal to X_corrected in this panel."),
+            ("X", "Model-ready output alias.", "X_corrected", "observed/experimental", "Only in corrected panel."),
+            ("X_observed", "Observed output alias.", "X_corrected", "observed/experimental", "Only in corrected panel."),
+            ("D", "Model-ready demand alias.", "D_proxy_corrected", "proxy/experimental", "Only in corrected panel."),
+            ("M", "Model-ready input alias.", "M_corrected", "proxy/experimental", "Only in corrected panel."),
+            ("available_inputs", "Historical input availability proxy.", "M_corrected", "proxy/experimental", "Only in corrected panel."),
+            ("K", "Capacity proxy.", "capacity_margin * X_corrected", "proxy/experimental", "Uses corrected X."),
+            ("I", "Inventory proxy.", "inventory_days * M_corrected / 365", "proxy/experimental", "Uses corrected M."),
+            ("observed_input_intensity", "Observed monetary input intensity.", "M_corrected / X_corrected", "observed/experimental", "Invalid when corrected X is zero or missing."),
+            ("effective_input_intensity", "Fallback input intensity used for scalar feasibility.", "corrected fallback hierarchy", "proxy/experimental", "node/country_category/country_ecosystem/sector/global/missing."),
+            ("X_raw_current_convention", "Raw current-column output diagnostic.", "T.sum(axis=0)+FD_raw.sum(axis=1)", "diagnostic", "Matches old convention before inventory adjustment."),
+            ("X_row_raw", "Raw row-output diagnostic.", "T.sum(axis=1)+FD_raw.sum(axis=1)", "diagnostic", "Keeps raw FD."),
+            ("X_row_no_inventory", "Row-output no-inventory diagnostic.", "T.sum(axis=1)+FD_no_inventory.sum(axis=1)", "diagnostic", "Equals X_corrected."),
+            ("X_column_no_inventory", "Column-output no-inventory diagnostic.", "T.sum(axis=0)+FD_no_inventory.sum(axis=1)", "diagnostic", "Current orientation with inventory excluded."),
+            ("EI_source_note", "EI provenance note.", "merged metrics panel", "diagnostic", "EI is joined from metrics and emissions_observed uses corrected X."),
+        ]
+        dictionary = pd.DataFrame(rows, columns=["column", "description", "source", "observed_or_proxy", "notes"])
+        return ABMV3OutputWriter(self.paths).write_dataframe(
+            dictionary,
+            "diagnostics",
+            f"abm_v3_input_panel_column_dictionary_{self.orientation}.csv",
+        )
+
+    def write_corrected_negative_ei_rows(self, panel: pd.DataFrame, start_year: int, end_year: int) -> Path:
+        columns = ["Year", "country_sector", "Country", "Sector", "X_observed", "EI", "emissions_observed"]
+        if "EI" not in panel.columns:
+            rows = pd.DataFrame(columns=columns)
+        else:
+            negative_mask = pd.to_numeric(panel["EI"], errors="coerce") < 0
+            rows = panel.loc[negative_mask, columns].copy() if negative_mask.any() else pd.DataFrame(columns=columns)
+        return ABMV3OutputWriter(self.paths).write_dataframe(
+            rows,
+            "diagnostics",
+            f"negative_ei_rows_{start_year}_{end_year}_{self.orientation}.csv",
+        )
+
+    def write_corrected_input_intensity_summary(self, panel: pd.DataFrame, start_year: int, end_year: int) -> Path:
+        rows = []
+        if panel.empty:
+            summary = pd.DataFrame(columns=self._input_intensity_summary_columns())
+        else:
+            for year, year_panel in panel.groupby("Year", dropna=False):
+                rows.append(self._input_intensity_summary_row(year_panel, int(year)))
+            summary = pd.DataFrame(rows, columns=self._input_intensity_summary_columns())
+        return ABMV3OutputWriter(self.paths).write_dataframe(
+            summary,
+            "diagnostics",
+            f"input_intensity_summary_{start_year}_{end_year}_{self.orientation}.csv",
+        )
+
+    def build_orientation_comparison(self, corrected_panel: pd.DataFrame, start_year: int, end_year: int) -> pd.DataFrame:
+        node_comparison = self.build_orientation_node_comparison(corrected_panel, start_year, end_year)
+        rows = []
+        for year, group in node_comparison.groupby("Year", dropna=False):
+            x_diff = group["X_difference"].abs()
+            relative_x_diff = x_diff / group["X_old_current_convention"].where(group["X_old_current_convention"] > 0)
+            rows.append(
+                {
+                    "Year": int(year),
+                    "old_X_total": float(group["X_old_current_convention"].sum(skipna=True)),
+                    "corrected_X_total": float(group["X_corrected"].sum(skipna=True)),
+                    "old_M_total": float(group["M_old_current_convention"].sum(skipna=True)),
+                    "corrected_M_total": float(group["M_corrected"].sum(skipna=True)),
+                    "old_D_total": float(group["D_old_current_convention"].sum(skipna=True)),
+                    "corrected_D_total": float(group["D_corrected"].sum(skipna=True)),
+                    "old_mean_input_intensity": float(group["old_input_intensity"].mean(skipna=True)),
+                    "corrected_mean_input_intensity": float(group["corrected_input_intensity"].mean(skipna=True)),
+                    "old_negative_X_count": int((group["X_old_current_convention"] < 0.0).sum()),
+                    "corrected_negative_X_count": int((group["X_corrected"] < 0.0).sum()),
+                    "old_non_positive_X_count": int((group["X_old_current_convention"] <= 0.0).sum()),
+                    "corrected_non_positive_X_count": int((group["X_corrected"] <= 0.0).sum()),
+                    "correlation_old_X_corrected_X": self._safe_correlation(
+                        group["X_old_current_convention"].to_numpy(dtype=float),
+                        group["X_corrected"].to_numpy(dtype=float),
+                    ),
+                    "mean_absolute_percentage_difference_X": float(relative_x_diff.mean(skipna=True)),
+                    "median_absolute_percentage_difference_X": float(relative_x_diff.median(skipna=True)),
+                    "top_absolute_difference_node": str(group.loc[x_diff.idxmax(), "country_sector"]) if len(group) else "",
+                    "top_relative_difference_node": str(group.loc[relative_x_diff.idxmax(), "country_sector"])
+                    if relative_x_diff.notna().any()
+                    else "",
+                }
+            )
+        return pd.DataFrame(rows)
+
+    def build_orientation_node_comparison(
+        self,
+        corrected_panel: pd.DataFrame,
+        start_year: int,
+        end_year: int,
+    ) -> pd.DataFrame:
+        old_panel = self._load_old_panel_for_comparison(start_year, end_year)
+        base_columns = ["Year", "country_sector", "Country", "Country_detail", "Category", "Sector"]
+        result = corrected_panel[base_columns].copy()
+        result["X_corrected"] = pd.to_numeric(corrected_panel["X_corrected"], errors="coerce")
+        result["M_corrected"] = pd.to_numeric(corrected_panel["M_corrected"], errors="coerce")
+        result["D_corrected"] = pd.to_numeric(corrected_panel["D_proxy_corrected"], errors="coerce")
+        result["corrected_input_intensity"] = pd.to_numeric(corrected_panel["observed_input_intensity"], errors="coerce")
+
+        if old_panel is not None:
+            old_columns = ["Year", "country_sector", "X_observed", "M_observed", "D_proxy_observed", "observed_input_intensity"]
+            old = old_panel.reindex(columns=old_columns).copy()
+            old = old.rename(
+                columns={
+                    "X_observed": "X_old_current_convention",
+                    "M_observed": "M_old_current_convention",
+                    "D_proxy_observed": "D_old_current_convention",
+                    "observed_input_intensity": "old_input_intensity",
+                }
+            )
+            result = result.merge(old, on=["Year", "country_sector"], how="left")
+        else:
+            result["X_old_current_convention"] = pd.to_numeric(corrected_panel["X_raw_current_convention"], errors="coerce")
+            result["M_old_current_convention"] = pd.to_numeric(corrected_panel["intermediate_input_use"], errors="coerce")
+            result["D_old_current_convention"] = pd.to_numeric(corrected_panel["X_row_raw"], errors="coerce")
+            result["old_input_intensity"] = self._safe_input_ratio(
+                result["M_old_current_convention"],
+                result["X_old_current_convention"],
+            )
+
+        result["X_difference"] = result["X_corrected"] - result["X_old_current_convention"]
+        result["X_ratio_corrected_to_old"] = self._safe_input_ratio(result["X_corrected"], result["X_old_current_convention"])
+        result["M_difference"] = result["M_corrected"] - result["M_old_current_convention"]
+        result["M_ratio_corrected_to_old"] = self._safe_input_ratio(result["M_corrected"], result["M_old_current_convention"])
+        x_relative_difference = self._safe_input_ratio(result["X_difference"].abs(), result["X_old_current_convention"].abs())
+        intensity_difference = (result["corrected_input_intensity"] - result["old_input_intensity"]).abs()
+        intensity_relative_difference = self._safe_input_ratio(intensity_difference, result["old_input_intensity"].abs())
+        result["large_X_difference_flag"] = (result["X_difference"].abs() > 1e-6) & (x_relative_difference > 0.25)
+        result["large_input_intensity_difference_flag"] = (intensity_difference > 1e-6) & (
+            intensity_relative_difference > 0.25
+        )
+        return result.reindex(
+            columns=[
+                "Year",
+                "country_sector",
+                "Country",
+                "Country_detail",
+                "Category",
+                "Sector",
+                "X_old_current_convention",
+                "X_corrected",
+                "M_old_current_convention",
+                "M_corrected",
+                "D_old_current_convention",
+                "D_corrected",
+                "X_difference",
+                "X_ratio_corrected_to_old",
+                "M_difference",
+                "M_ratio_corrected_to_old",
+                "old_input_intensity",
+                "corrected_input_intensity",
+                "large_X_difference_flag",
+                "large_input_intensity_difference_flag",
+            ]
+        )
+
+    def _load_old_panel_for_comparison(self, start_year: int, end_year: int) -> pd.DataFrame | None:
+        old_path = self.paths.abm_v3_historical_panel_file(start_year, end_year)
+        if not old_path.exists():
+            LOGGER.warning("Old ABM-ready panel missing at %s; comparison will use raw current-convention diagnostics.", old_path)
+            return None
+        old_panel = pd.read_parquet(old_path)
+        required_columns = {"Year", "country_sector", "X_observed", "M_observed", "D_proxy_observed"}
+        missing = required_columns.difference(old_panel.columns)
+        if missing:
+            LOGGER.warning(
+                "Old ABM-ready panel at %s lacks comparison columns %s; using raw current-convention diagnostics.",
+                old_path,
+                sorted(missing),
+            )
+            return None
+        return old_panel
+
+    def _validate_orientation(self) -> None:
+        if self.orientation != CORRECTED_ORIENTATION:
+            raise ValueError(
+                f"Unsupported corrected input panel orientation '{self.orientation}'. "
+                f"Allowed orientation: {CORRECTED_ORIENTATION}"
+            )
+
+    def _ei_source_note(self, panel: pd.DataFrame) -> str:
+        if "EI" in panel.columns:
+            return "EI joined from merged Eora-Atlas metrics panel; emissions_observed uses corrected X."
+        return "EI unavailable from merged Eora-Atlas metrics panel."
+
+    def _empty_excluded_fd_columns(self) -> pd.DataFrame:
+        return pd.DataFrame(columns=self._excluded_fd_columns())
+
+    def _excluded_fd_columns(self) -> list[str]:
+        return ["Year", "fd_column_label", "excluded_reason", "column_total", "negative_entry_count", "min_value", "max_value"]
+
+    def _corrected_missing_year_report(self, year: int, missing: str) -> dict[str, object]:
+        return {
+            "Year": year,
+            "row_count": 0,
+            "notes": f"missing raw files: {missing}",
+        }
+
+    def _corrected_failed_year_report(self, year: int, message: str) -> dict[str, object]:
+        return {
+            "Year": year,
+            "row_count": 0,
+            "notes": f"failed: {message}",
+        }
+
+    def _safe_correlation(self, left_values: np.ndarray, right_values: np.ndarray) -> float:
+        valid = np.isfinite(left_values) & np.isfinite(right_values)
+        if int(valid.sum()) < 2:
+            return np.nan
+        left = left_values[valid]
+        right = right_values[valid]
+        if np.isclose(float(np.std(left)), 0.0) or np.isclose(float(np.std(right)), 0.0):
+            return np.nan
+        return float(np.corrcoef(left, right)[0, 1])

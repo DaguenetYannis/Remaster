@@ -9,7 +9,7 @@ import pandas as pd
 from src.abm_v3.config import ABMV3Config
 from src.abm_v3.data_loader import ABMV3DataLoader
 from src.abm_v3.diagnostics.hypothesis_reports import HypothesisReportGenerator
-from src.abm_v3.input_panel_builder import ABMV3InputPanelBuilder
+from src.abm_v3.input_panel_builder import ABMV3InputPanelBuilder, CorrectedOrientationInputPanelBuilder
 from src.abm_v3.leontief.behavioural import (
     BehaviouralLeontiefEngine,
     BehaviouralLeontiefOutputWriter,
@@ -67,6 +67,19 @@ def build_parser() -> argparse.ArgumentParser:
     build_input_panel.add_argument("--start-year", type=int, default=1995)
     build_input_panel.add_argument("--end-year", type=int, default=2016)
     build_input_panel.add_argument("--overwrite", action="store_true")
+
+    build_corrected_input_panel = subparsers.add_parser("build-corrected-input-panel")
+    build_corrected_input_panel.add_argument("--start-year", type=int, default=1995)
+    build_corrected_input_panel.add_argument("--end-year", type=int, default=2016)
+    build_corrected_input_panel.add_argument("--overwrite", action="store_true")
+    build_corrected_input_panel.add_argument("--orientation", default="transpose_row_fd_without_inventory")
+    build_corrected_input_panel.add_argument("--capacity-margin", type=float, default=None)
+    build_corrected_input_panel.add_argument("--inventory-days", type=int, default=None)
+
+    smoke_corrected_input_panel = subparsers.add_parser("smoke-test-corrected-input-panel")
+    smoke_corrected_input_panel.add_argument("--start-year", type=int, default=1995)
+    smoke_corrected_input_panel.add_argument("--end-year", type=int, default=2016)
+    smoke_corrected_input_panel.add_argument("--orientation", default="transpose_row_fd_without_inventory")
 
     leontief_propagate = subparsers.add_parser("leontief-propagate")
     leontief_propagate.add_argument("--year", type=int, required=True)
@@ -317,6 +330,79 @@ def build_behavioural_leontief_config(args: argparse.Namespace) -> ABMV3Config:
     return replace(config, leontief=leontief_config)
 
 
+def build_corrected_input_panel_config(args: argparse.Namespace) -> ABMV3Config:
+    """Apply corrected input-panel CLI overrides without changing defaults."""
+    config = ABMV3Config()
+    calibration_config = config.calibration
+    if getattr(args, "capacity_margin", None) is not None:
+        calibration_config = replace(calibration_config, capacity_margin=args.capacity_margin)
+    if getattr(args, "inventory_days", None) is not None:
+        calibration_config = replace(calibration_config, inventory_days=args.inventory_days)
+    return replace(config, calibration=calibration_config)
+
+
+def run_corrected_input_panel_build(
+    start_year: int,
+    end_year: int,
+    overwrite: bool = False,
+    orientation: str = "transpose_row_fd_without_inventory",
+    paths: ABMV3Paths | None = None,
+    config: ABMV3Config | None = None,
+) -> pd.DataFrame:
+    """Build the experimental corrected-orientation input panel."""
+    active_paths = paths or ABMV3Paths()
+    active_config = config or ABMV3Config()
+    print(f"[ABM v3] Building corrected input panel: orientation={orientation}")
+    builder = CorrectedOrientationInputPanelBuilder(active_paths, active_config, orientation=orientation)
+    panel = builder.build(start_year=start_year, end_year=end_year, overwrite=overwrite)
+    for year, group in panel.groupby("Year", dropna=False):
+        excluded_path = active_paths.abm_v3_output_root / "diagnostics" / (
+            f"abm_v3_excluded_inventory_fd_columns_{start_year}_{end_year}.csv"
+        )
+        excluded_columns = 0
+        if excluded_path.exists():
+            excluded = pd.read_csv(excluded_path)
+            excluded_columns = int((excluded["Year"].astype(int) == int(year)).sum()) if "Year" in excluded.columns else 0
+        print(
+            "[ABM v3] "
+            f"Year {int(year)}: "
+            f"X_corrected_total={group['X_corrected'].sum():.12g}, "
+            f"inventory_excluded_columns={excluded_columns}"
+        )
+    output_path = builder.output_path(start_year, end_year)
+    diagnostics_dir = active_paths.abm_v3_output_root / "diagnostics"
+    print(f"[ABM v3] Wrote corrected panel to {output_path}")
+    print(f"[ABM v3] Wrote orientation comparison diagnostics to {diagnostics_dir}")
+    return panel
+
+
+def run_corrected_input_panel_smoke_test(
+    start_year: int,
+    end_year: int,
+    orientation: str = "transpose_row_fd_without_inventory",
+    paths: ABMV3Paths | None = None,
+) -> pd.DataFrame:
+    """Smoke test the corrected panel explicitly."""
+    active_paths = paths or ABMV3Paths()
+    panel_path = active_paths.abm_v3_corrected_historical_panel_file(start_year, end_year, orientation)
+    if not panel_path.exists():
+        raise FileNotFoundError(f"Corrected input panel not found: {panel_path}")
+    panel = pd.read_parquet(panel_path)
+    report = RealDataSmokeTester(active_paths, start_year=start_year, end_year=end_year).run(
+        df=panel,
+        write_report=False,
+    )
+    output_path = active_paths.abm_v3_output_root / "diagnostics" / (
+        f"real_data_smoke_test_{orientation}_{start_year}_{end_year}.csv"
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    report.to_csv(output_path, index=False)
+    passed = int(report["passed"].sum()) if "passed" in report.columns else 0
+    print(f"[ABM v3] Corrected input panel smoke test: rows={len(report)}, passed={passed}")
+    print(f"[ABM v3] Wrote corrected smoke test to {output_path}")
+    return report
+
+
 def load_behavioural_capacity(paths: ABMV3Paths, config: ABMV3Config, year: int) -> pd.Series:
     """Load same-year K from the canonical ABM-ready input panel."""
     print("[ABM v3 Behavioural Leontief] Loading capacity from ABM-ready panel...")
@@ -436,6 +522,22 @@ def main() -> None:
         else:
             panel = builder.build(args.start_year, args.end_year, overwrite=args.overwrite)
             print(f"ABM-ready input panel written: {path} rows={len(panel)}")
+    elif args.command == "build-corrected-input-panel":
+        run_corrected_input_panel_build(
+            args.start_year,
+            args.end_year,
+            overwrite=args.overwrite,
+            orientation=args.orientation,
+            paths=ABMV3Paths(),
+            config=build_corrected_input_panel_config(args),
+        )
+    elif args.command == "smoke-test-corrected-input-panel":
+        run_corrected_input_panel_smoke_test(
+            args.start_year,
+            args.end_year,
+            orientation=args.orientation,
+            paths=ABMV3Paths(),
+        )
     elif args.command == "leontief-propagate":
         run_leontief_year(args.year, paths=ABMV3Paths(), config=build_leontief_config(args))
     elif args.command == "leontief-propagate-range":

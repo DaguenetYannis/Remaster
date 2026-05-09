@@ -63,6 +63,17 @@ class ABMV3Paths:
             / f"abm_v3_historical_panel_{start_year}_{end_year}.parquet"
         )
 
+    def abm_v3_corrected_historical_panel_file(
+        self,
+        start_year: int,
+        end_year: int,
+        orientation: str = "transpose_row_fd_without_inventory",
+    ) -> Path:
+        return (
+            self.abm_v3_input_root
+            / f"abm_v3_historical_panel_{start_year}_{end_year}_{orientation}.parquet"
+        )
+
     @property
     def leontief_dir(self) -> Path:
         return self.abm_v3_output_root / "leontief"
