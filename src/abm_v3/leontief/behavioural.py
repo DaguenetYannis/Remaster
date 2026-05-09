@@ -87,6 +87,8 @@ class BehaviouralLeontiefEngine:
                 {
                     "Year": year_data.year,
                     "mode": year_data.mode,
+                    "input_panel_orientation": year_data.input_panel_orientation,
+                    "capacity_source": year_data.capacity_source,
                     "round": round_number,
                     "received_demand_total": float(np.sum(flow)),
                     "desired_output_total": float(np.sum(desired_output)),
@@ -199,7 +201,9 @@ class BehaviouralLeontiefEngine:
         rows = year_data.labels.copy()
         rows.insert(0, "Year", year_data.year)
         rows.insert(1, "mode", year_data.mode)
-        rows.insert(2, "round", round_number)
+        rows.insert(2, "input_panel_orientation", year_data.input_panel_orientation)
+        rows.insert(3, "capacity_source", year_data.capacity_source)
+        rows.insert(4, "round", round_number)
         rows["received_demand"] = received_demand
         rows["desired_output"] = desired_output
         rows["K"] = capacity_values
@@ -214,7 +218,7 @@ class BehaviouralLeontiefEngine:
 
 
 class BehaviouralLeontiefValidator:
-    """Validate behavioural Leontief output against raw observed X."""
+    """Validate behavioural Leontief output against the selected observed X."""
 
     def build_node_comparison(
         self,
@@ -224,6 +228,9 @@ class BehaviouralLeontiefValidator:
         comparison = year_data.labels.copy()
         comparison.insert(0, "Year", year_data.year)
         comparison["mode"] = year_data.mode
+        comparison["input_panel_orientation"] = year_data.input_panel_orientation
+        comparison["validation_reference"] = year_data.validation_reference
+        comparison["capacity_source"] = year_data.capacity_source
         comparison["X_observed"] = year_data.X_observed.to_numpy(dtype=float)
         comparison["X_realized"] = result.X_realized.to_numpy(dtype=float)
         comparison["X_desired"] = result.X_desired.to_numpy(dtype=float)
@@ -265,6 +272,10 @@ class BehaviouralLeontiefValidator:
                 {
                     "Year": year_data.year,
                     "mode": year_data.mode,
+                    "input_panel_orientation": year_data.input_panel_orientation,
+                    "coefficient_mode": year_data.mode,
+                    "validation_reference": year_data.validation_reference,
+                    "capacity_source": year_data.capacity_source,
                     "converged": result.converged,
                     "rounds_used": result.rounds_used,
                     "tolerance": result.tolerance,
@@ -331,11 +342,12 @@ class BehaviouralLeontiefOutputWriter:
     ) -> dict[str, object]:
         self.paths.behavioural_leontief_outputs_dir.mkdir(parents=True, exist_ok=True)
         self.paths.behavioural_leontief_diagnostics_dir.mkdir(parents=True, exist_ok=True)
-        output_path = self.paths.behavioural_leontief_output_path(year_data.year, year_data.mode)
-        summary_path = self.paths.behavioural_leontief_summary_path(year_data.year, year_data.mode)
-        node_comparison_path = self.paths.behavioural_leontief_node_comparison_path(year_data.year, year_data.mode)
-        rounds_path = self.paths.behavioural_leontief_rounds_path(year_data.year, year_data.mode)
-        node_rounds_path = self.paths.behavioural_leontief_node_rounds_path(year_data.year, year_data.mode)
+        orientation = year_data.input_panel_orientation
+        output_path = self.paths.behavioural_leontief_output_path(year_data.year, year_data.mode, orientation)
+        summary_path = self.paths.behavioural_leontief_summary_path(year_data.year, year_data.mode, orientation)
+        node_comparison_path = self.paths.behavioural_leontief_node_comparison_path(year_data.year, year_data.mode, orientation)
+        rounds_path = self.paths.behavioural_leontief_rounds_path(year_data.year, year_data.mode, orientation)
+        node_rounds_path = self.paths.behavioural_leontief_node_rounds_path(year_data.year, year_data.mode, orientation)
         node_comparison.to_parquet(output_path, index=False)
         summary.to_csv(summary_path, index=False)
         node_comparison.to_csv(node_comparison_path, index=False)

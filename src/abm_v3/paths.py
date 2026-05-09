@@ -74,6 +74,28 @@ class ABMV3Paths:
             / f"abm_v3_historical_panel_{start_year}_{end_year}_{orientation}.parquet"
         )
 
+    def abm_v3_historical_panel_file_for_orientation(
+        self,
+        start_year: int,
+        end_year: int,
+        input_panel_orientation: str | None = None,
+    ) -> Path:
+        """Return the historical input panel path for an explicit orientation."""
+        if input_panel_orientation in {None, "current_column"}:
+            return self.abm_v3_historical_panel_file(start_year, end_year)
+        if input_panel_orientation == "transpose_row_fd_without_inventory":
+            return self.abm_v3_corrected_historical_panel_file(
+                start_year,
+                end_year,
+                input_panel_orientation,
+            )
+        raise ValueError(f"Unknown input panel orientation: {input_panel_orientation}")
+
+    def _mode_suffix(self, mode: str, input_panel_orientation: str | None = None) -> str:
+        if input_panel_orientation is None:
+            return mode
+        return f"{mode}_{input_panel_orientation}"
+
     @property
     def leontief_dir(self) -> Path:
         return self.abm_v3_output_root / "leontief"
@@ -86,44 +108,49 @@ class ABMV3Paths:
     def leontief_diagnostics_dir(self) -> Path:
         return self.leontief_dir / "diagnostics"
 
-    def leontief_iterative_output_path(self, year: int, mode: str = "raw") -> Path:
-        return self.leontief_outputs_dir / f"leontief_iterative_output_{year}_{mode}.parquet"
+    def leontief_iterative_output_path(
+        self,
+        year: int,
+        mode: str = "raw",
+        input_panel_orientation: str | None = None,
+    ) -> Path:
+        return self.leontief_outputs_dir / f"leontief_iterative_output_{year}_{self._mode_suffix(mode, input_panel_orientation)}.parquet"
 
-    def leontief_summary_path(self, year: int, mode: str = "raw") -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_propagation_summary_{year}_{mode}.csv"
+    def leontief_summary_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_propagation_summary_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
 
-    def leontief_node_comparison_path(self, year: int, mode: str = "raw") -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_node_comparison_{year}_{mode}.csv"
+    def leontief_node_comparison_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_node_comparison_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
 
-    def leontief_rounds_path(self, year: int, mode: str = "raw") -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_rounds_{year}_{mode}.csv"
+    def leontief_rounds_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_rounds_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
 
-    def leontief_invalid_output_columns_path(self, year: int, mode: str = "raw") -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_invalid_output_columns_{year}_{mode}.csv"
+    def leontief_invalid_output_columns_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_invalid_output_columns_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
 
-    def leontief_viability_summary_path(self, year: int, mode: str = "raw") -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_coefficient_viability_summary_{year}_{mode}.csv"
+    def leontief_viability_summary_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_coefficient_viability_summary_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
 
-    def leontief_viability_columns_path(self, year: int, mode: str = "raw") -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_coefficient_viability_columns_{year}_{mode}.csv"
+    def leontief_viability_columns_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_coefficient_viability_columns_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
 
-    def leontief_negative_flows_path(self, year: int, mode: str = "raw") -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_negative_flows_{year}_{mode}.csv"
+    def leontief_negative_flows_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_negative_flows_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
 
-    def leontief_spectral_diagnostics_path(self, year: int, mode: str = "raw") -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_spectral_diagnostics_{year}_{mode}.csv"
+    def leontief_spectral_diagnostics_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_spectral_diagnostics_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
 
-    def leontief_top_unstable_nodes_path(self, year: int, mode: str = "raw") -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_top_unstable_nodes_{year}_{mode}.csv"
+    def leontief_top_unstable_nodes_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_top_unstable_nodes_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
 
-    def leontief_mode_diagnostics_path(self, year: int, mode: str = "raw") -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_mode_diagnostics_{year}_{mode}.csv"
+    def leontief_mode_diagnostics_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_mode_diagnostics_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
 
-    def leontief_excluded_fd_columns_path(self, year: int, mode: str = "raw") -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_excluded_fd_columns_{year}_{mode}.csv"
+    def leontief_excluded_fd_columns_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_excluded_fd_columns_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
 
-    def leontief_rescaled_columns_path(self, year: int, mode: str = "raw") -> Path:
-        return self.leontief_diagnostics_dir / f"leontief_rescaled_columns_{year}_{mode}.csv"
+    def leontief_rescaled_columns_path(self, year: int, mode: str = "raw", input_panel_orientation: str | None = None) -> Path:
+        return self.leontief_diagnostics_dir / f"leontief_rescaled_columns_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
 
     def leontief_mode_comparison_path(self, year: int) -> Path:
         return self.leontief_diagnostics_dir / f"leontief_mode_comparison_{year}.csv"
@@ -155,20 +182,20 @@ class ABMV3Paths:
     def behavioural_leontief_diagnostics_dir(self) -> Path:
         return self.behavioural_leontief_dir / "diagnostics"
 
-    def behavioural_leontief_output_path(self, year: int, mode: str = "fd_without_inventory") -> Path:
-        return self.behavioural_leontief_outputs_dir / f"behavioural_leontief_output_{year}_{mode}.parquet"
+    def behavioural_leontief_output_path(self, year: int, mode: str = "fd_without_inventory", input_panel_orientation: str | None = None) -> Path:
+        return self.behavioural_leontief_outputs_dir / f"behavioural_leontief_output_{year}_{self._mode_suffix(mode, input_panel_orientation)}.parquet"
 
-    def behavioural_leontief_summary_path(self, year: int, mode: str = "fd_without_inventory") -> Path:
-        return self.behavioural_leontief_diagnostics_dir / f"behavioural_leontief_summary_{year}_{mode}.csv"
+    def behavioural_leontief_summary_path(self, year: int, mode: str = "fd_without_inventory", input_panel_orientation: str | None = None) -> Path:
+        return self.behavioural_leontief_diagnostics_dir / f"behavioural_leontief_summary_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
 
-    def behavioural_leontief_node_comparison_path(self, year: int, mode: str = "fd_without_inventory") -> Path:
-        return self.behavioural_leontief_diagnostics_dir / f"behavioural_leontief_node_comparison_{year}_{mode}.csv"
+    def behavioural_leontief_node_comparison_path(self, year: int, mode: str = "fd_without_inventory", input_panel_orientation: str | None = None) -> Path:
+        return self.behavioural_leontief_diagnostics_dir / f"behavioural_leontief_node_comparison_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
 
-    def behavioural_leontief_rounds_path(self, year: int, mode: str = "fd_without_inventory") -> Path:
-        return self.behavioural_leontief_diagnostics_dir / f"behavioural_leontief_rounds_{year}_{mode}.csv"
+    def behavioural_leontief_rounds_path(self, year: int, mode: str = "fd_without_inventory", input_panel_orientation: str | None = None) -> Path:
+        return self.behavioural_leontief_diagnostics_dir / f"behavioural_leontief_rounds_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
 
-    def behavioural_leontief_node_rounds_path(self, year: int, mode: str = "fd_without_inventory") -> Path:
-        return self.behavioural_leontief_diagnostics_dir / f"behavioural_leontief_node_rounds_{year}_{mode}.csv"
+    def behavioural_leontief_node_rounds_path(self, year: int, mode: str = "fd_without_inventory", input_panel_orientation: str | None = None) -> Path:
+        return self.behavioural_leontief_diagnostics_dir / f"behavioural_leontief_node_rounds_{year}_{self._mode_suffix(mode, input_panel_orientation)}.csv"
 
     def metric_file(self, year: int, metric_name: str) -> Path:
         return self.metrics_root / str(year) / f"{metric_name}_{year}.parquet"

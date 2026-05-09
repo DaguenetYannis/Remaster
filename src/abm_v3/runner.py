@@ -4,6 +4,7 @@ import argparse
 import logging
 from dataclasses import replace
 
+import numpy as np
 import pandas as pd
 
 from src.abm_v3.config import ABMV3Config
@@ -15,7 +16,7 @@ from src.abm_v3.leontief.behavioural import (
     BehaviouralLeontiefOutputWriter,
     BehaviouralLeontiefValidator,
 )
-from src.abm_v3.leontief.coefficients import LeontiefCoefficientBuilder
+from src.abm_v3.leontief.coefficients import LeontiefCoefficientBuilder, LeontiefYearData
 from src.abm_v3.leontief.comparison import LeontiefModeComparator
 from src.abm_v3.leontief.orientation import LeontiefOrientationAuditor
 from src.abm_v3.leontief.outputs import LeontiefOutputWriter
@@ -87,6 +88,11 @@ def build_parser() -> argparse.ArgumentParser:
     leontief_propagate.add_argument("--tolerance", type=float, default=None)
     leontief_propagate.add_argument("--max-rounds", type=int, default=None)
     leontief_propagate.add_argument("--column-sum-cap", type=float, default=None)
+    leontief_propagate.add_argument(
+        "--input-panel-orientation",
+        choices=["current_column", "transpose_row_fd_without_inventory"],
+        default=None,
+    )
 
     leontief_range = subparsers.add_parser("leontief-propagate-range")
     leontief_range.add_argument("--start-year", type=int, required=True)
@@ -95,6 +101,11 @@ def build_parser() -> argparse.ArgumentParser:
     leontief_range.add_argument("--tolerance", type=float, default=None)
     leontief_range.add_argument("--max-rounds", type=int, default=None)
     leontief_range.add_argument("--column-sum-cap", type=float, default=None)
+    leontief_range.add_argument(
+        "--input-panel-orientation",
+        choices=["current_column", "transpose_row_fd_without_inventory"],
+        default=None,
+    )
 
     leontief_diagnose = subparsers.add_parser("leontief-diagnose")
     leontief_diagnose.add_argument("--year", type=int, required=True)
@@ -154,6 +165,11 @@ def build_parser() -> argparse.ArgumentParser:
     behavioural_leontief.add_argument("--tolerance", type=float, default=None)
     behavioural_leontief.add_argument("--max-rounds", type=int, default=None)
     behavioural_leontief.add_argument("--no-node-rounds", action="store_true")
+    behavioural_leontief.add_argument(
+        "--input-panel-orientation",
+        choices=["current_column", "transpose_row_fd_without_inventory"],
+        default=None,
+    )
 
     behavioural_leontief_range = subparsers.add_parser("behavioural-leontief-range")
     behavioural_leontief_range.add_argument("--start-year", type=int, required=True)
@@ -163,6 +179,11 @@ def build_parser() -> argparse.ArgumentParser:
     behavioural_leontief_range.add_argument("--tolerance", type=float, default=None)
     behavioural_leontief_range.add_argument("--max-rounds", type=int, default=None)
     behavioural_leontief_range.add_argument("--no-node-rounds", action="store_true")
+    behavioural_leontief_range.add_argument(
+        "--input-panel-orientation",
+        choices=["current_column", "transpose_row_fd_without_inventory"],
+        default=None,
+    )
     return parser
 
 
@@ -176,6 +197,7 @@ def run_leontief_year(
     active_config = config or ABMV3Config()
     coefficient_builder = LeontiefCoefficientBuilder(active_paths, active_config.leontief)
     year_data = coefficient_builder.load_year(year)
+    year_data = apply_input_panel_validation_target(year_data, active_paths, active_config, year)
     viability = LeontiefViabilityAnalyzer(active_config.leontief).analyze(year_data)
     LeontiefOutputWriter(active_paths).write_viability(viability)
     engine = LeontiefPropagationEngine(
@@ -311,6 +333,8 @@ def build_leontief_config(args: argparse.Namespace) -> ABMV3Config:
         leontief_config = replace(leontief_config, leontief_mode=args.mode)
     if hasattr(args, "column_sum_cap") and args.column_sum_cap is not None:
         leontief_config = replace(leontief_config, leontief_column_sum_cap=args.column_sum_cap)
+    if hasattr(args, "input_panel_orientation") and args.input_panel_orientation is not None:
+        leontief_config = replace(leontief_config, input_panel_orientation=args.input_panel_orientation)
     if hasattr(args, "eta_capacity") and args.eta_capacity is not None:
         leontief_config = replace(leontief_config, behavioural_capacity_eta=args.eta_capacity)
     if hasattr(args, "no_node_rounds") and args.no_node_rounds:
@@ -403,12 +427,84 @@ def run_corrected_input_panel_smoke_test(
     return report
 
 
-def load_behavioural_capacity(paths: ABMV3Paths, config: ABMV3Config, year: int) -> pd.Series:
-    """Load same-year K from the canonical ABM-ready input panel."""
-    print("[ABM v3 Behavioural Leontief] Loading capacity from ABM-ready panel...")
-    panel = ABMV3DataLoader(paths).load_abm_ready_historical_panel(
+def apply_input_panel_validation_target(
+    year_data: LeontiefYearData,
+    paths: ABMV3Paths,
+    config: ABMV3Config,
+    year: int,
+) -> LeontiefYearData:
+    """Override validation X from the explicitly selected input panel."""
+    orientation = config.leontief.input_panel_orientation
+    if orientation is None:
+        return year_data
+    panel = ABMV3DataLoader(paths).load_input_panel_for_orientation(
         config.calibration.start_year,
         config.calibration.end_year,
+        orientation,
+        config,
+    )
+    required_columns = {"Year", "country_sector", "X_observed"}
+    missing = required_columns.difference(panel.columns)
+    if missing:
+        raise ValueError(
+            f"Input panel orientation '{orientation}' is missing validation columns: {sorted(missing)}"
+        )
+    labels = year_data.labels["country_sector"].astype(str).tolist()
+    year_panel = panel.loc[panel["Year"].astype(int) == int(year), ["country_sector", "X_observed"]].copy()
+    if year_panel.empty:
+        raise ValueError(f"Input panel orientation '{orientation}' has no validation rows for year {year}")
+    x_observed = pd.Series(
+        pd.to_numeric(year_panel["X_observed"], errors="coerce").to_numpy(dtype=float),
+        index=year_panel["country_sector"].astype(str),
+        name="X_observed",
+    ).reindex(labels)
+    if x_observed.isna().all():
+        raise ValueError(
+            f"Input panel orientation '{orientation}' has no country_sector labels matching Leontief year {year}"
+        )
+    invalid_output_columns = build_invalid_output_columns_for_validation_target(year_data, x_observed)
+    panel_path = ABMV3DataLoader(paths).input_panel_path_for_orientation(
+        config.calibration.start_year,
+        config.calibration.end_year,
+        orientation,
+    )
+    print(
+        "[ABM v3 Leontief] "
+        f"Validation target: input_panel_orientation={orientation}, X_observed={panel_path}"
+    )
+    return replace(
+        year_data,
+        X_observed=x_observed,
+        input_panel_orientation=orientation,
+        validation_reference=f"input_panel:{orientation}:X_observed",
+        invalid_output_columns=invalid_output_columns,
+    )
+
+
+def build_invalid_output_columns_for_validation_target(year_data: LeontiefYearData, x_observed: pd.Series) -> pd.DataFrame:
+    """Report invalid output rows after applying an explicit validation target."""
+    labels_frame = year_data.labels.copy()
+    x_values = x_observed.to_numpy(dtype=float)
+    invalid_mask = (~np.isfinite(x_values)) | (x_values <= 0.0)
+    invalid = labels_frame.loc[invalid_mask].copy()
+    invalid.insert(0, "Year", year_data.year)
+    invalid["X_observed"] = x_values[invalid_mask]
+    invalid["reason"] = ["missing_or_non_finite_output" if pd.isna(value) else "non_positive_output" for value in x_values[invalid_mask]]
+    return invalid
+
+
+def load_behavioural_capacity(paths: ABMV3Paths, config: ABMV3Config, year: int) -> pd.Series:
+    """Load same-year K from the selected ABM-ready input panel."""
+    orientation = config.leontief.input_panel_orientation
+    selected_orientation = orientation or "current_column"
+    print(
+        "[ABM v3 Behavioural Leontief] "
+        f"Loading capacity from input_panel_orientation={selected_orientation}..."
+    )
+    panel = ABMV3DataLoader(paths).load_input_panel_for_orientation(
+        config.calibration.start_year,
+        config.calibration.end_year,
+        orientation,
         config,
     )
     required_columns = {"Year", "country_sector", "K"}
@@ -437,7 +533,19 @@ def run_behavioural_leontief_year(
         f"Loading year {year} with mode={active_config.leontief.leontief_mode}..."
     )
     year_data = LeontiefCoefficientBuilder(active_paths, active_config.leontief).load_year(year)
+    year_data = apply_input_panel_validation_target(year_data, active_paths, active_config, year)
     capacity = load_behavioural_capacity(active_paths, active_config, year)
+    orientation = active_config.leontief.input_panel_orientation or "current_column"
+    capacity_path = ABMV3DataLoader(active_paths).input_panel_path_for_orientation(
+        active_config.calibration.start_year,
+        active_config.calibration.end_year,
+        active_config.leontief.input_panel_orientation,
+    )
+    year_data = replace(
+        year_data,
+        input_panel_orientation=active_config.leontief.input_panel_orientation,
+        capacity_source=f"input_panel:{orientation}:K:{capacity_path}",
+    )
     result = BehaviouralLeontiefEngine(active_config.leontief).propagate(year_data, capacity)
     validator = BehaviouralLeontiefValidator()
     node_comparison = validator.build_node_comparison(year_data, result)

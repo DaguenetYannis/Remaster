@@ -74,6 +74,8 @@ class LeontiefViabilityAnalyzer:
         columns = year_data.labels.copy()
         columns.insert(0, "Year", year_data.year)
         columns["mode"] = year_data.mode
+        columns["input_panel_orientation"] = year_data.input_panel_orientation
+        columns["validation_reference"] = year_data.validation_reference
         columns["X_observed"] = year_data.X_observed.to_numpy(dtype=float)
         x_used = (
             year_data.X_used_for_coefficients
@@ -128,6 +130,9 @@ class LeontiefViabilityAnalyzer:
                 {
                     "Year": year_data.year,
                     "mode": year_data.mode,
+                    "input_panel_orientation": year_data.input_panel_orientation,
+                    "coefficient_mode": year_data.mode,
+                    "validation_reference": year_data.validation_reference,
                     "matrix": matrix_name,
                     "approximate_spectral_radius": radius,
                     "converged": converged,
@@ -180,6 +185,9 @@ class LeontiefViabilityAnalyzer:
                 {
                     "Year": year_data.year,
                     "mode": year_data.mode,
+                    "input_panel_orientation": year_data.input_panel_orientation,
+                    "coefficient_mode": year_data.mode,
+                    "validation_reference": year_data.validation_reference,
                     "node_count": len(columns),
                     "invalid_output_column_count": int(columns["invalid_output_column"].sum()),
                     "near_zero_positive_output_count": int(columns["near_zero_positive_output"].sum()),

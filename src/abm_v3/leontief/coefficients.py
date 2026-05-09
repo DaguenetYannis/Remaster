@@ -29,6 +29,9 @@ class LeontiefYearData:
     rescaled_columns: pd.DataFrame | None = None
     invalid_output_columns: pd.DataFrame | None = None
     negative_flows: pd.DataFrame | None = None
+    input_panel_orientation: str | None = None
+    validation_reference: str = "coefficient_builder_raw_X"
+    capacity_source: str | None = None
     total_negative_T_entries: int = 0
     total_negative_FD_entries: int = 0
     most_negative_T_value: float = np.nan
@@ -66,8 +69,8 @@ class LeontiefCoefficientBuilder:
 
         print("[ABM v3 Leontief] Computing X and Y...")
         raw_y_values = fd_matrix.sum(axis=1).to_numpy(dtype=float)
-        intermediate_output_values = t_matrix.sum(axis=0).to_numpy(dtype=float)
-        raw_x_values = (intermediate_output_values + raw_y_values).astype(float)
+        column_intermediate_output_values = t_matrix.sum(axis=0).to_numpy(dtype=float)
+        raw_x_values = (column_intermediate_output_values + raw_y_values).astype(float)
         raw_y_final_demand = pd.Series(raw_y_values, index=labels, name="Y_raw_final_demand")
         raw_x_observed = pd.Series(raw_x_values, index=labels, name="X_raw_observed")
         fd_for_mode, excluded_fd_columns, mode_metrics = self._build_mode_final_demand_matrix(
@@ -76,6 +79,7 @@ class LeontiefCoefficientBuilder:
             fd_matrix,
         )
         used_y_values = fd_for_mode.sum(axis=1).to_numpy(dtype=float)
+        intermediate_output_values = self._intermediate_output_for_mode(mode, t_matrix)
         used_x_values = (intermediate_output_values + used_y_values).astype(float)
         y_used_for_propagation = pd.Series(used_y_values, index=labels, name="Y_used_for_propagation")
         x_used_for_coefficients = pd.Series(used_x_values, index=labels, name="X_used_for_coefficients")
@@ -88,7 +92,8 @@ class LeontiefCoefficientBuilder:
 
         invalid_output_columns = self._build_invalid_output_columns(year, labels_frame, x_used_for_coefficients)
         print("[ABM v3 Leontief] Building sparse A...")
-        coefficient_matrix = self._build_sparse_technical_coefficients(t_matrix, x_used_for_coefficients)
+        coefficient_source = self._coefficient_source_for_mode(mode, t_matrix)
+        coefficient_matrix = self._build_sparse_technical_coefficients(coefficient_source, x_used_for_coefficients)
         coefficient_matrix, rescaled_columns, rescale_metrics = self._apply_mode_rescaling(
             year,
             mode,
@@ -286,9 +291,9 @@ class LeontiefCoefficientBuilder:
             "difference_between_raw_Y_and_positive_Y": 0.0,
             "number_of_rows_where_Y_changed": 0,
         }
-        if mode == "fd_without_inventory":
+        if mode in {"fd_without_inventory", "transpose_row_output_fd_without_inventory"}:
             inventory_mask = self._inventory_fd_column_mask(list(fd_matrix.columns))
-            excluded = self._build_excluded_fd_columns(year, fd_matrix, inventory_mask)
+            excluded = self._build_excluded_fd_columns(year, mode, fd_matrix, inventory_mask)
             fd_used = fd_matrix.loc[:, ~inventory_mask].copy()
             used_values = fd_used.to_numpy(dtype=float, copy=False)
             used_y = fd_used.sum(axis=1).to_numpy(dtype=float)
@@ -318,6 +323,18 @@ class LeontiefCoefficientBuilder:
             return fd_used, self._empty_excluded_fd_columns(), metrics
         return fd_matrix.copy(), self._empty_excluded_fd_columns(), metrics
 
+    def _intermediate_output_for_mode(self, mode: str, t_matrix: pd.DataFrame) -> np.ndarray:
+        """Build the intermediate-output basis used in X for one coefficient mode."""
+        if mode == "transpose_row_output_fd_without_inventory":
+            return t_matrix.sum(axis=1).to_numpy(dtype=float)
+        return t_matrix.sum(axis=0).to_numpy(dtype=float)
+
+    def _coefficient_source_for_mode(self, mode: str, t_matrix: pd.DataFrame) -> pd.DataFrame:
+        """Select the T orientation used for A construction."""
+        if mode == "transpose_row_output_fd_without_inventory":
+            return t_matrix.T
+        return t_matrix
+
     def _inventory_fd_column_mask(self, fd_columns: list[object]) -> np.ndarray:
         patterns = tuple(pattern.lower() for pattern in self.config.inventory_label_patterns)
         mask = []
@@ -329,6 +346,7 @@ class LeontiefCoefficientBuilder:
     def _build_excluded_fd_columns(
         self,
         year: int,
+        mode: str,
         fd_matrix: pd.DataFrame,
         inventory_mask: np.ndarray,
     ) -> pd.DataFrame:
@@ -340,7 +358,7 @@ class LeontiefCoefficientBuilder:
             rows.append(
                 {
                     "Year": year,
-                    "mode": "fd_without_inventory",
+                    "mode": mode,
                     "fd_column_index": column_index,
                     "fd_column_label": str(column_label),
                     "column_total": float(np.nansum(values)),

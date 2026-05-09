@@ -89,6 +89,11 @@ class ProductionFeasibilityConfig:
 class LeontiefPropagationConfig:
     """Experimental on-the-fly Leontief propagation settings."""
 
+    input_panel_orientation: str | None = None
+    allowed_input_panel_orientations: tuple[str, ...] = (
+        "current_column",
+        "transpose_row_fd_without_inventory",
+    )
     tolerance: float = 1e-8
     max_rounds: int = 200
     leontief_mode: str = "raw"
@@ -105,6 +110,7 @@ class LeontiefPropagationConfig:
         "positive_final_demand_only",
         "column_rescaled_if_sum_above_one",
         "column_rescaled_if_abs_sum_above_one",
+        "transpose_row_output_fd_without_inventory",
     )
     write_mode_diagnostics: bool = True
     use_sparse: bool = True

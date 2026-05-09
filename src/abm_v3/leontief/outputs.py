@@ -26,14 +26,15 @@ class LeontiefOutputWriter:
         self.paths.leontief_outputs_dir.mkdir(parents=True, exist_ok=True)
         self.paths.leontief_diagnostics_dir.mkdir(parents=True, exist_ok=True)
 
-        iterative_output_path = self.paths.leontief_iterative_output_path(year_data.year, year_data.mode)
-        summary_path = self.paths.leontief_summary_path(year_data.year, year_data.mode)
-        node_comparison_path = self.paths.leontief_node_comparison_path(year_data.year, year_data.mode)
-        rounds_path = self.paths.leontief_rounds_path(year_data.year, year_data.mode)
-        invalid_path = self.paths.leontief_invalid_output_columns_path(year_data.year, year_data.mode)
-        mode_diagnostics_path = self.paths.leontief_mode_diagnostics_path(year_data.year, year_data.mode)
-        excluded_fd_columns_path = self.paths.leontief_excluded_fd_columns_path(year_data.year, year_data.mode)
-        rescaled_columns_path = self.paths.leontief_rescaled_columns_path(year_data.year, year_data.mode)
+        orientation = year_data.input_panel_orientation
+        iterative_output_path = self.paths.leontief_iterative_output_path(year_data.year, year_data.mode, orientation)
+        summary_path = self.paths.leontief_summary_path(year_data.year, year_data.mode, orientation)
+        node_comparison_path = self.paths.leontief_node_comparison_path(year_data.year, year_data.mode, orientation)
+        rounds_path = self.paths.leontief_rounds_path(year_data.year, year_data.mode, orientation)
+        invalid_path = self.paths.leontief_invalid_output_columns_path(year_data.year, year_data.mode, orientation)
+        mode_diagnostics_path = self.paths.leontief_mode_diagnostics_path(year_data.year, year_data.mode, orientation)
+        excluded_fd_columns_path = self.paths.leontief_excluded_fd_columns_path(year_data.year, year_data.mode, orientation)
+        rescaled_columns_path = self.paths.leontief_rescaled_columns_path(year_data.year, year_data.mode, orientation)
 
         node_comparison.to_parquet(iterative_output_path, index=False)
         summary.to_csv(summary_path, index=False)
@@ -75,11 +76,12 @@ class LeontiefOutputWriter:
         """Write coefficient viability diagnostics for one year."""
         self.paths.leontief_diagnostics_dir.mkdir(parents=True, exist_ok=True)
         mode = self._diagnostic_mode(diagnostics)
-        summary_path = self.paths.leontief_viability_summary_path(diagnostics.year, mode)
-        columns_path = self.paths.leontief_viability_columns_path(diagnostics.year, mode)
-        negative_flows_path = self.paths.leontief_negative_flows_path(diagnostics.year, mode)
-        spectral_path = self.paths.leontief_spectral_diagnostics_path(diagnostics.year, mode)
-        top_nodes_path = self.paths.leontief_top_unstable_nodes_path(diagnostics.year, mode)
+        orientation = self._diagnostic_input_panel_orientation(diagnostics)
+        summary_path = self.paths.leontief_viability_summary_path(diagnostics.year, mode, orientation)
+        columns_path = self.paths.leontief_viability_columns_path(diagnostics.year, mode, orientation)
+        negative_flows_path = self.paths.leontief_negative_flows_path(diagnostics.year, mode, orientation)
+        spectral_path = self.paths.leontief_spectral_diagnostics_path(diagnostics.year, mode, orientation)
+        top_nodes_path = self.paths.leontief_top_unstable_nodes_path(diagnostics.year, mode, orientation)
 
         diagnostics.summary.to_csv(summary_path, index=False)
         diagnostics.columns.to_csv(columns_path, index=False)
@@ -125,3 +127,12 @@ class LeontiefOutputWriter:
         if "mode" in diagnostics.columns.columns and len(diagnostics.columns):
             return str(diagnostics.columns["mode"].iloc[0])
         return "raw"
+
+    def _diagnostic_input_panel_orientation(self, diagnostics: LeontiefViabilityDiagnostics) -> str | None:
+        for frame in [diagnostics.summary, diagnostics.columns]:
+            if "input_panel_orientation" in frame.columns and len(frame):
+                value = frame["input_panel_orientation"].iloc[0]
+                if pd.isna(value):
+                    return None
+                return str(value)
+        return None

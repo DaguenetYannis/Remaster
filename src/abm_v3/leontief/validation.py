@@ -19,6 +19,8 @@ class LeontiefPropagationValidator:
         comparison = year_data.labels.copy()
         comparison.insert(0, "Year", year_data.year)
         comparison["mode"] = year_data.mode
+        comparison["input_panel_orientation"] = year_data.input_panel_orientation
+        comparison["validation_reference"] = year_data.validation_reference
         comparison["Y_final_demand"] = year_data.Y_final_demand.to_numpy(dtype=float)
         if year_data.Y_raw_final_demand is not None:
             comparison["Y_raw_final_demand"] = year_data.Y_raw_final_demand.to_numpy(dtype=float)
@@ -62,6 +64,9 @@ class LeontiefPropagationValidator:
                 {
                     "Year": year_data.year,
                     "mode": year_data.mode,
+                    "input_panel_orientation": year_data.input_panel_orientation,
+                    "coefficient_mode": year_data.mode,
+                    "validation_reference": year_data.validation_reference,
                     "rounds_used": result.rounds_used,
                     "tolerance": result.tolerance,
                     "max_rounds": result.max_rounds,
