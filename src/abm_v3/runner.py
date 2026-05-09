@@ -11,6 +11,10 @@ from src.abm_v3.config import ABMV3Config
 from src.abm_v3.data_loader import ABMV3DataLoader
 from src.abm_v3.diagnostics.hypothesis_reports import HypothesisReportGenerator
 from src.abm_v3.input_panel_builder import ABMV3InputPanelBuilder, CorrectedOrientationInputPanelBuilder
+from src.abm_v3.ei_transition.models import EITransitionModelSuite
+from src.abm_v3.ei_transition.outputs import EITransitionOutputWriter
+from src.abm_v3.ei_transition.panel import EITransitionPanelBuilder
+from src.abm_v3.ei_transition.validation import validate_transition_split
 from src.abm_v3.leontief.behavioural import (
     BehaviouralLeontiefEngine,
     BehaviouralLeontiefOutputWriter,
@@ -76,6 +80,19 @@ def build_parser() -> argparse.ArgumentParser:
     build_corrected_input_panel.add_argument("--orientation", default="transpose_row_fd_without_inventory")
     build_corrected_input_panel.add_argument("--capacity-margin", type=float, default=None)
     build_corrected_input_panel.add_argument("--inventory-days", type=int, default=None)
+
+    build_ei_transition_panel = subparsers.add_parser("build-ei-transition-panel")
+    build_ei_transition_panel.add_argument("--start-year", type=int, default=1995)
+    build_ei_transition_panel.add_argument("--end-year", type=int, default=2016)
+    build_ei_transition_panel.add_argument("--overwrite", action="store_true")
+
+    fit_ei_transition = subparsers.add_parser("fit-ei-transition")
+    fit_ei_transition.add_argument("--start-year", type=int, default=1995)
+    fit_ei_transition.add_argument("--end-year", type=int, default=2016)
+    fit_ei_transition.add_argument("--train-end-year", type=int, default=2012)
+    fit_ei_transition.add_argument("--validation-start-year", type=int, default=2013)
+    fit_ei_transition.add_argument("--validation-end-year", type=int, default=2015)
+    fit_ei_transition.add_argument("--overwrite-panel", action="store_true")
 
     smoke_corrected_input_panel = subparsers.add_parser("smoke-test-corrected-input-panel")
     smoke_corrected_input_panel.add_argument("--start-year", type=int, default=1995)
@@ -427,6 +444,93 @@ def run_corrected_input_panel_smoke_test(
     return report
 
 
+def run_ei_transition_panel_build(
+    start_year: int = 1995,
+    end_year: int = 2016,
+    overwrite: bool = False,
+    paths: ABMV3Paths | None = None,
+) -> dict[str, object]:
+    """Build and write the historical EI transition panel."""
+    active_paths = paths or ABMV3Paths()
+    panel_path = active_paths.ei_transition_panel_path(start_year, end_year)
+    if panel_path.exists() and not overwrite:
+        print(f"[ABM v3 EI Transition] Panel already exists: {panel_path}")
+        panel = pd.read_parquet(panel_path)
+        return {"panel": panel, "written_paths": {"panel": panel_path}}
+    builder = EITransitionPanelBuilder(active_paths)
+    result = builder.build(start_year=start_year, end_year=end_year)
+    written_paths = EITransitionOutputWriter(active_paths).write_panel(start_year, end_year, result)
+    report = result.sample_report.iloc[0]
+    print(
+        "[ABM v3 EI Transition] "
+        f"Built panel rows={report['total_rows']}, included={report['included_rows']}, "
+        f"excluded={report['excluded_rows']}"
+    )
+    print(f"[ABM v3 EI Transition] Wrote transition panel to {written_paths['panel']}")
+    return {"panel": result.panel, "sample_report": result.sample_report, "written_paths": written_paths}
+
+
+def run_ei_transition_fit(
+    start_year: int = 1995,
+    end_year: int = 2016,
+    train_end_year: int = 2012,
+    validation_start_year: int = 2013,
+    validation_end_year: int = 2015,
+    overwrite_panel: bool = False,
+    paths: ABMV3Paths | None = None,
+) -> dict[str, object]:
+    """Build/load the EI transition panel, fit models, and write diagnostics."""
+    active_paths = paths or ABMV3Paths()
+    panel_path = active_paths.ei_transition_panel_path(start_year, end_year)
+    if overwrite_panel or not panel_path.exists():
+        panel_output = run_ei_transition_panel_build(
+            start_year=start_year,
+            end_year=end_year,
+            overwrite=True,
+            paths=active_paths,
+        )
+        panel = panel_output["panel"]
+    else:
+        print(f"[ABM v3 EI Transition] Loading transition panel from {panel_path}")
+        panel = pd.read_parquet(panel_path)
+    validate_transition_split(panel, train_end_year, validation_start_year, validation_end_year)
+    fit_output = EITransitionModelSuite(alpha=1.0).fit_all(
+        panel,
+        train_end_year=train_end_year,
+        validation_start_year=validation_start_year,
+        validation_end_year=validation_end_year,
+    )
+    written_paths = EITransitionOutputWriter(active_paths).write_fit_outputs(
+        start_year,
+        end_year,
+        fit_output["scores"],
+        fit_output["coefficients"],
+        fit_output["expected_signs"],
+        fit_output["predictions"],
+    )
+    print(
+        "[ABM v3 EI Transition] "
+        f"Fitted {len(fit_output['scores'])} models with validation years "
+        f"{validation_start_year}-{validation_end_year}"
+    )
+    for row in fit_output["scores"].to_dict("records"):
+        print(
+            "[ABM v3 EI Transition] "
+            f"model={row['model_name']}, rmse={row['rmse']:.12g}, "
+            f"mae={row['mae']:.12g}, r2={row['r2']:.12g}, "
+            f"corr={row['correlation_predicted_observed']:.12g}"
+        )
+    print(f"[ABM v3 EI Transition] Wrote diagnostics to {active_paths.ei_transition_dir}")
+    return {
+        "panel": panel,
+        "scores": fit_output["scores"],
+        "coefficients": fit_output["coefficients"],
+        "expected_signs": fit_output["expected_signs"],
+        "predictions": fit_output["predictions"],
+        "written_paths": written_paths,
+    }
+
+
 def apply_input_panel_validation_target(
     year_data: LeontiefYearData,
     paths: ABMV3Paths,
@@ -638,6 +742,23 @@ def main() -> None:
             orientation=args.orientation,
             paths=ABMV3Paths(),
             config=build_corrected_input_panel_config(args),
+        )
+    elif args.command == "build-ei-transition-panel":
+        run_ei_transition_panel_build(
+            start_year=args.start_year,
+            end_year=args.end_year,
+            overwrite=args.overwrite,
+            paths=ABMV3Paths(),
+        )
+    elif args.command == "fit-ei-transition":
+        run_ei_transition_fit(
+            start_year=args.start_year,
+            end_year=args.end_year,
+            train_end_year=args.train_end_year,
+            validation_start_year=args.validation_start_year,
+            validation_end_year=args.validation_end_year,
+            overwrite_panel=args.overwrite_panel,
+            paths=ABMV3Paths(),
         )
     elif args.command == "smoke-test-corrected-input-panel":
         run_corrected_input_panel_smoke_test(

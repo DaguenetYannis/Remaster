@@ -57,6 +57,47 @@ class ABMV3Paths:
     def abm_v3_input_root(self) -> Path:
         return self.abm_v3_output_root / "inputs"
 
+    @property
+    def ei_transition_dir(self) -> Path:
+        return self.abm_v3_output_root / "ei_transition"
+
+    @property
+    def ei_transition_inputs_dir(self) -> Path:
+        return self.ei_transition_dir / "inputs"
+
+    @property
+    def ei_transition_diagnostics_dir(self) -> Path:
+        return self.ei_transition_dir / "diagnostics"
+
+    @property
+    def ei_transition_models_dir(self) -> Path:
+        return self.ei_transition_dir / "models"
+
+    @property
+    def ei_transition_predictions_dir(self) -> Path:
+        return self.ei_transition_dir / "predictions"
+
+    def ei_transition_panel_path(self, start_year: int, end_year: int) -> Path:
+        return self.ei_transition_inputs_dir / f"ei_transition_panel_{start_year}_{end_year}.parquet"
+
+    def ei_transition_sample_report_path(self, start_year: int, end_year: int) -> Path:
+        return self.ei_transition_diagnostics_dir / f"ei_transition_sample_report_{start_year}_{end_year}.csv"
+
+    def ei_transition_sample_report_by_year_path(self, start_year: int, end_year: int) -> Path:
+        return self.ei_transition_diagnostics_dir / f"ei_transition_sample_report_by_year_{start_year}_{end_year}.csv"
+
+    def ei_transition_model_scores_path(self, start_year: int, end_year: int) -> Path:
+        return self.ei_transition_diagnostics_dir / f"ei_transition_model_scores_{start_year}_{end_year}.csv"
+
+    def ei_transition_coefficients_path(self, start_year: int, end_year: int) -> Path:
+        return self.ei_transition_models_dir / f"ei_transition_coefficients_{start_year}_{end_year}.csv"
+
+    def ei_transition_expected_signs_path(self, start_year: int, end_year: int) -> Path:
+        return self.ei_transition_diagnostics_dir / f"ei_transition_expected_signs_{start_year}_{end_year}.csv"
+
+    def ei_transition_predictions_path(self, start_year: int, end_year: int) -> Path:
+        return self.ei_transition_predictions_dir / f"ei_transition_predictions_{start_year}_{end_year}.parquet"
+
     def abm_v3_historical_panel_file(self, start_year: int, end_year: int) -> Path:
         return (
             self.abm_v3_input_root
