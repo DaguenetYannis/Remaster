@@ -1,0 +1,11 @@
+model_name,term,expected_sign,actual_sign,coefficient,matches_expected_sign,interpretation
+economic_only,log_EI,positive,positive,0.0306398502926199,True,log_EI matches expected positive relationship with EI reduction.
+green_transition,log_EI,positive,positive,0.03102349429354909,True,log_EI matches expected positive relationship with EI reduction.
+green_transition,green_capability,positive,positive,0.004500978587188035,True,green_capability matches expected positive relationship with EI reduction.
+green_transition,g_network,positive,negative,-0.0007014178518326551,False,g_network has negative coefficient; expected positive.
+green_transition,general_complexity,positive_or_moderating,positive,0.013389638802126772,True,general_complexity matches expected positive_or_moderating relationship with EI reduction.
+network_robustness,log_EI,positive,positive,0.024393406485262527,True,log_EI matches expected positive relationship with EI reduction.
+network_robustness,green_capability,positive,positive,0.0044621562405821715,True,green_capability matches expected positive relationship with EI reduction.
+network_robustness,g_in,positive,positive,0.0010202117001732755,True,g_in matches expected positive relationship with EI reduction.
+network_robustness,g_out,positive,negative,-0.009414744661240128,False,g_out has negative coefficient; expected positive.
+network_robustness,general_complexity,positive_or_moderating,positive,0.013774696120451619,True,general_complexity matches expected positive_or_moderating relationship with EI reduction.

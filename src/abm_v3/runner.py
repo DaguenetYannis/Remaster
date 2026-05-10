@@ -31,6 +31,7 @@ from src.abm_v3.model import ABMV3Model
 from src.abm_v3.paths import ABMV3Paths
 from src.abm_v3.real_data_smoke_test import RealDataSmokeTester
 from src.abm_v3.scenarios.registry import list_scenarios
+from src.abm_v3.validation_report import ABMV3ValidationReportBuilder
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -201,6 +202,10 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["current_column", "transpose_row_fd_without_inventory"],
         default=None,
     )
+
+    validation_report = subparsers.add_parser("validation-report")
+    validation_report.add_argument("--start-year", type=int, default=1995)
+    validation_report.add_argument("--end-year", type=int, default=2016)
     return parser
 
 
@@ -847,6 +852,13 @@ def main() -> None:
         for year in range(args.start_year, args.end_year + 1):
             print(f"[ABM v3 Behavioural Leontief] Range progress: year={year}")
             run_behavioural_leontief_year(year, paths=ABMV3Paths(), config=config)
+    elif args.command == "validation-report":
+        written_paths = ABMV3ValidationReportBuilder(ABMV3Paths()).build(
+            start_year=args.start_year,
+            end_year=args.end_year,
+        )
+        for name, path in written_paths.items():
+            print(f"[ABM v3 Validation Report] {name}: {path}")
 
 
 if __name__ == "__main__":

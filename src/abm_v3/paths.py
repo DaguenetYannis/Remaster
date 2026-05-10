@@ -58,6 +58,93 @@ class ABMV3Paths:
         return self.abm_v3_output_root / "inputs"
 
     @property
+    def abm_v3_diagnostics_dir(self) -> Path:
+        return self.abm_v3_output_root / "diagnostics"
+
+    @property
+    def validation_report_dir(self) -> Path:
+        return self.abm_v3_output_root / "validation_report"
+
+    def validation_report_summary_path(self, start_year: int, end_year: int) -> Path:
+        return self.validation_report_dir / f"abm_v3_validation_report_summary_{start_year}_{end_year}.csv"
+
+    def validation_report_by_year_path(self, start_year: int, end_year: int) -> Path:
+        return self.validation_report_dir / f"abm_v3_validation_report_by_year_{start_year}_{end_year}.csv"
+
+    def validation_report_flags_path(self, start_year: int, end_year: int) -> Path:
+        return self.validation_report_dir / f"abm_v3_validation_report_flags_{start_year}_{end_year}.csv"
+
+    def validation_report_top_output_errors_path(self, start_year: int, end_year: int) -> Path:
+        return self.validation_report_dir / f"abm_v3_validation_report_top_output_errors_{start_year}_{end_year}.csv"
+
+    def validation_report_markdown_path(self, start_year: int, end_year: int) -> Path:
+        return self.validation_report_dir / f"abm_v3_validation_report_markdown_{start_year}_{end_year}.md"
+
+    def corrected_input_panel_build_report_path(
+        self,
+        start_year: int,
+        end_year: int,
+        orientation: str = "transpose_row_fd_without_inventory",
+    ) -> Path:
+        return (
+            self.abm_v3_diagnostics_dir
+            / f"abm_v3_input_panel_build_report_{start_year}_{end_year}_{orientation}.csv"
+        )
+
+    def input_panel_orientation_comparison_path(self, start_year: int, end_year: int) -> Path:
+        return self.abm_v3_diagnostics_dir / f"abm_v3_input_panel_orientation_comparison_{start_year}_{end_year}.csv"
+
+    def corrected_real_data_smoke_test_path(
+        self,
+        start_year: int,
+        end_year: int,
+        orientation: str = "transpose_row_fd_without_inventory",
+    ) -> Path:
+        return self.abm_v3_diagnostics_dir / f"real_data_smoke_test_{orientation}_{start_year}_{end_year}.csv"
+
+    def corrected_input_intensity_summary_path(
+        self,
+        start_year: int,
+        end_year: int,
+        orientation: str = "transpose_row_fd_without_inventory",
+    ) -> Path:
+        return self.abm_v3_diagnostics_dir / f"input_intensity_summary_{start_year}_{end_year}_{orientation}.csv"
+
+    def corrected_negative_ei_rows_path(
+        self,
+        start_year: int,
+        end_year: int,
+        orientation: str = "transpose_row_fd_without_inventory",
+    ) -> Path:
+        return self.abm_v3_diagnostics_dir / f"negative_ei_rows_{start_year}_{end_year}_{orientation}.csv"
+
+    def behavioural_leontief_summary_range_path(
+        self,
+        start_year: int,
+        end_year: int,
+        mode: str = "transpose_row_output_fd_without_inventory",
+        input_panel_orientation: str = "transpose_row_fd_without_inventory",
+    ) -> Path:
+        suffix = self.format_leontief_range_suffix(start_year, end_year, mode, input_panel_orientation)
+        return self.leontief_behavioural_summary_diagnostics_dir / f"summary_{suffix}.csv"
+
+    def behavioural_leontief_node_comparison_range_path(
+        self,
+        start_year: int,
+        end_year: int,
+        mode: str = "transpose_row_output_fd_without_inventory",
+        input_panel_orientation: str = "transpose_row_fd_without_inventory",
+    ) -> Path:
+        suffix = self.format_leontief_range_suffix(start_year, end_year, mode, input_panel_orientation)
+        return self.leontief_behavioural_node_comparison_diagnostics_dir / f"node_comparison_{suffix}.csv"
+
+    def legacy_historical_reproduction_summary_path(self) -> Path:
+        return self.abm_v3_output_root / "validation" / "historical_reproduction_summary.csv"
+
+    def legacy_rolling_validation_results_path(self) -> Path:
+        return self.abm_v3_output_root / "validation" / "rolling_validation_results.csv"
+
+    @property
     def ei_transition_dir(self) -> Path:
         return self.abm_v3_output_root / "ei_transition"
 
