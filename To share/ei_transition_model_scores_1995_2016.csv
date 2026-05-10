@@ -1,4 +1,0 @@
-model_name,n_train,n_validation,validation_mode,target,rmse,mae,correlation_predicted_observed,r2,mean_observed_reduction,mean_predicted_reduction,notes
-economic_only,30873,5162,holdout_2013_2015,ei_reduction_next,0.3345050846877588,0.1629636570526951,0.10883285907088126,0.010958063569486365,0.02461132295867944,0.026591718872040555,Validation mode=holdout_2013_2015; Ridge alpha=1.0 with standardized numeric predictors.
-green_transition,30873,5162,holdout_2013_2015,ei_reduction_next,0.33503759072722705,0.16350757386930148,0.0885577758667382,0.0078066016754035905,0.02461132295867944,0.025523842886291146,Validation mode=holdout_2013_2015; Ridge alpha=1.0 with standardized numeric predictors.
-network_robustness,30873,5162,holdout_2013_2015,ei_reduction_next,0.3351500849738879,0.16249339738275745,0.08487006541095156,0.007140200110828943,0.02461132295867944,0.022528786980444235,Validation mode=holdout_2013_2015; Ridge alpha=1.0 with standardized numeric predictors.
