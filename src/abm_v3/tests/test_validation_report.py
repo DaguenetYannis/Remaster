@@ -161,6 +161,25 @@ def write_ei_diagnostics(paths: ABMV3Paths) -> None:
     ).to_csv(paths.ei_transition_model_scores_path(1995, 2016), index=False)
 
 
+def write_weak_ei_diagnostics_without_included_share(paths: ABMV3Paths) -> None:
+    paths.ei_transition_diagnostics_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "total_rows": 100,
+                "included_rows": 40,
+                "excluded_rows": 60,
+            }
+        ]
+    ).to_csv(paths.ei_transition_sample_report_path(1995, 2016), index=False)
+    pd.DataFrame(
+        [
+            {"model_name": "economic_only", "rmse": 1.0, "mae": 0.8, "r2": 0.3, "correlation_predicted_observed": 0.5},
+            {"model_name": "green_transition", "rmse": 1.1, "mae": 0.9, "r2": 0.2, "correlation_predicted_observed": 0.4},
+        ]
+    ).to_csv(paths.ei_transition_model_scores_path(1995, 2016), index=False)
+
+
 def test_builder_writes_all_five_outputs() -> None:
     paths = toy_paths()
     write_required_diagnostics(paths)
@@ -213,3 +232,17 @@ def test_validation_report_cli_command_is_registered() -> None:
     assert args.command == "validation-report"
     assert args.start_year == 1995
     assert args.end_year == 2016
+
+
+def test_markdown_computes_missing_included_share_and_keeps_weak_ei_diagnostic_only() -> None:
+    paths = toy_paths()
+    write_required_diagnostics(paths)
+    write_weak_ei_diagnostics_without_included_share(paths)
+
+    written_paths = ABMV3ValidationReportBuilder(paths).build(1995, 2016)
+
+    markdown = written_paths["markdown"].read_text(encoding="utf-8")
+    summary = pd.read_csv(written_paths["summary"])
+    assert "included_share=0.4" in markdown
+    assert summary.loc[0, "ei_transition_status"] == "diagnostic_only"
+    assert summary.loc[0, "overall_status"] == "production_ready_ei_pending"

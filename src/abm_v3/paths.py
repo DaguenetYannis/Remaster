@@ -145,6 +145,68 @@ class ABMV3Paths:
         return self.abm_v3_output_root / "validation" / "rolling_validation_results.csv"
 
     @property
+    def behavioural_leontief_scenario_dir(self) -> Path:
+        return self.abm_v3_output_root / "leontief" / "behavioural" / "scenarios"
+
+    @property
+    def behavioural_leontief_scenario_outputs_dir(self) -> Path:
+        return self.behavioural_leontief_scenario_dir / "outputs"
+
+    @property
+    def behavioural_leontief_scenario_diagnostics_dir(self) -> Path:
+        return self.behavioural_leontief_scenario_dir / "diagnostics"
+
+    @property
+    def behavioural_leontief_scenario_selected_nodes_dir(self) -> Path:
+        return self.behavioural_leontief_scenario_dir / "selected_nodes"
+
+    def behavioural_leontief_scenario_output_path(
+        self,
+        year: int,
+        scenario_name: str,
+        mode: str,
+        input_panel_orientation: str | None,
+    ) -> Path:
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.behavioural_leontief_scenario_outputs_dir / f"output_{scenario_name}_{suffix}.parquet"
+
+    def behavioural_leontief_scenario_summary_path(
+        self,
+        year: int,
+        scenario_name: str,
+        mode: str,
+        input_panel_orientation: str | None,
+    ) -> Path:
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.behavioural_leontief_scenario_diagnostics_dir / f"summary_{scenario_name}_{suffix}.csv"
+
+    def behavioural_leontief_scenario_node_comparison_path(
+        self,
+        year: int,
+        scenario_name: str,
+        mode: str,
+        input_panel_orientation: str | None,
+    ) -> Path:
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.behavioural_leontief_scenario_diagnostics_dir / f"node_comparison_{scenario_name}_{suffix}.csv"
+
+    def behavioural_leontief_scenario_selected_nodes_path(self, year: int, scenario_name: str) -> Path:
+        return self.behavioural_leontief_scenario_selected_nodes_dir / f"selected_nodes_{scenario_name}_{year}.csv"
+
+    def behavioural_leontief_scenario_aggregate_path(
+        self,
+        year: int,
+        scenario_name: str,
+        mode: str,
+        input_panel_orientation: str | None,
+    ) -> Path:
+        suffix = self.format_leontief_suffix(year, mode, input_panel_orientation)
+        return self.behavioural_leontief_scenario_diagnostics_dir / f"aggregate_{scenario_name}_{suffix}.csv"
+
+    def behavioural_leontief_scenario_metadata_path(self, year: int, scenario_name: str) -> Path:
+        return self.behavioural_leontief_scenario_diagnostics_dir / f"metadata_{scenario_name}_{year}.csv"
+
+    @property
     def ei_transition_dir(self) -> Path:
         return self.abm_v3_output_root / "ei_transition"
 

@@ -287,9 +287,7 @@ class ABMV3ValidationReportBuilder:
         total_rows = self._numeric_value(first, "total_rows")
         included_rows = self._numeric_value(first, "included_rows")
         excluded_rows = self._numeric_value(first, "excluded_rows")
-        included_share = self._numeric_value(first, "included_share")
-        if not np.isfinite(included_share):
-            included_share = included_rows / total_rows if total_rows > 0 else np.nan
+        included_share = self._included_share_from_sample_row(first)
 
         self._add_flag(
             flags,
@@ -515,12 +513,13 @@ class ABMV3ValidationReportBuilder:
             parts.append("EI transition sample diagnostics are missing.")
         else:
             row = sample.iloc[0]
+            included_share = self._included_share_from_sample_row(row)
             parts.append(
                 "- Sample: "
                 f"total_rows={self._format_number(self._numeric_value(row, 'total_rows'))}; "
                 f"included_rows={self._format_number(self._numeric_value(row, 'included_rows'))}; "
                 f"excluded_rows={self._format_number(self._numeric_value(row, 'excluded_rows'))}; "
-                f"included_share={self._format_number(self._numeric_value(row, 'included_share'))}"
+                f"included_share={self._format_number(included_share)}"
             )
         if scores is not None and not scores.empty:
             parts.append("- Model scores:\n\n" + self._table_markdown(self._model_score_table(scores)))
@@ -586,7 +585,7 @@ class ABMV3ValidationReportBuilder:
         rows.append("| " + " | ".join(columns) + " |")
         rows.append("| " + " | ".join(["---"] * len(columns)) + " |")
         for _, row in display.iterrows():
-            values = [str(row[column]).replace("|", "/") for column in display.columns]
+            values = [self._clean_markdown_display_value(row[column]) for column in display.columns]
             rows.append("| " + " | ".join(values) + " |")
         return "\n".join(rows)
 
@@ -610,6 +609,12 @@ class ABMV3ValidationReportBuilder:
         area_flags = flags.loc[flags["area"].eq("ei_transition")]
         if area_flags["severity"].eq("blocking").any():
             return "blocked"
+        diagnostic_only_flags = {
+            "EI transition included share is low.",
+            "Green transition EI model does not improve R2 over economic-only.",
+        }
+        if area_flags["flag"].isin(diagnostic_only_flags).any():
+            return "diagnostic_only"
         if area_flags["severity"].eq("warning").any():
             return "usable_with_warnings"
         return "diagnostic_only"
@@ -651,6 +656,23 @@ class ABMV3ValidationReportBuilder:
             ratios = self._safe_ratio_series(summary["realized_output_total"], summary["observed_output_total"])
             return float(ratios.mean(skipna=True))
         return np.nan
+
+    def _included_share_from_sample_row(self, row: pd.Series) -> float:
+        included_share = self._numeric_value(row, "included_share")
+        if np.isfinite(included_share):
+            return included_share
+        total_rows = self._numeric_value(row, "total_rows")
+        included_rows = self._numeric_value(row, "included_rows")
+        if np.isfinite(total_rows) and total_rows > 0 and np.isfinite(included_rows):
+            return float(included_rows / total_rows)
+        return np.nan
+
+    def _clean_markdown_display_value(self, value: object) -> str:
+        text = str(value).replace("|", "/")
+        return text.replace(
+            "Finacial Intermediation and Business Activities",
+            "Financial Intermediation and Business Activities",
+        )
 
     def _convergence_count(self, summary: pd.DataFrame) -> int:
         if "converged" not in summary.columns:

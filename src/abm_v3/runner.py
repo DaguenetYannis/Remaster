@@ -25,6 +25,8 @@ from src.abm_v3.leontief.comparison import LeontiefModeComparator
 from src.abm_v3.leontief.orientation import LeontiefOrientationAuditor
 from src.abm_v3.leontief.outputs import LeontiefOutputWriter
 from src.abm_v3.leontief.propagation import LeontiefPropagationEngine
+from src.abm_v3.leontief.scenarios.registry import get_behavioural_scenario, list_behavioural_scenarios
+from src.abm_v3.leontief.scenarios.runner import BehaviouralLeontiefScenarioRunner
 from src.abm_v3.leontief.validation import LeontiefPropagationValidator
 from src.abm_v3.leontief.viability import LeontiefViabilityAnalyzer
 from src.abm_v3.model import ABMV3Model
@@ -206,6 +208,31 @@ def build_parser() -> argparse.ArgumentParser:
     validation_report = subparsers.add_parser("validation-report")
     validation_report.add_argument("--start-year", type=int, default=1995)
     validation_report.add_argument("--end-year", type=int, default=2016)
+
+    behavioural_scenario = subparsers.add_parser("behavioural-scenario")
+    behavioural_scenario.add_argument("--year", type=int, required=True)
+    behavioural_scenario.add_argument("--scenario", required=True)
+    behavioural_scenario.add_argument("--mode", default="transpose_row_output_fd_without_inventory")
+    behavioural_scenario.add_argument("--input-panel-orientation", default="transpose_row_fd_without_inventory")
+    behavioural_scenario.add_argument("--shock-size", type=float, default=None)
+    behavioural_scenario.add_argument("--selector", default=None)
+    behavioural_scenario.add_argument("--low-ei-quantile", type=float, default=0.25)
+    behavioural_scenario.add_argument("--high-ei-quantile", type=float, default=0.75)
+    behavioural_scenario.add_argument("--high-capability-quantile", type=float, default=0.75)
+
+    behavioural_scenario_range = subparsers.add_parser("behavioural-scenario-range")
+    behavioural_scenario_range.add_argument("--start-year", type=int, required=True)
+    behavioural_scenario_range.add_argument("--end-year", type=int, required=True)
+    behavioural_scenario_range.add_argument("--scenario", required=True)
+    behavioural_scenario_range.add_argument("--mode", default="transpose_row_output_fd_without_inventory")
+    behavioural_scenario_range.add_argument("--input-panel-orientation", default="transpose_row_fd_without_inventory")
+    behavioural_scenario_range.add_argument("--shock-size", type=float, default=None)
+    behavioural_scenario_range.add_argument("--selector", default=None)
+    behavioural_scenario_range.add_argument("--low-ei-quantile", type=float, default=0.25)
+    behavioural_scenario_range.add_argument("--high-ei-quantile", type=float, default=0.75)
+    behavioural_scenario_range.add_argument("--high-capability-quantile", type=float, default=0.75)
+
+    subparsers.add_parser("list-behavioural-scenarios")
     return parser
 
 
@@ -374,6 +401,32 @@ def build_behavioural_leontief_config(args: argparse.Namespace) -> ABMV3Config:
     if getattr(args, "max_rounds", None) is not None:
         leontief_config = replace(leontief_config, behavioural_max_rounds=args.max_rounds)
     return replace(config, leontief=leontief_config)
+
+
+def build_behavioural_scenario_config(args: argparse.Namespace) -> ABMV3Config:
+    """Build the corrected behavioural Leontief scenario config from CLI args."""
+    config = ABMV3Config()
+    leontief_config = replace(
+        config.leontief,
+        leontief_mode=args.mode,
+        input_panel_orientation=args.input_panel_orientation,
+    )
+    return replace(config, leontief=leontief_config)
+
+
+def build_behavioural_scenario_shock(args: argparse.Namespace):
+    """Load a registered behavioural scenario and apply CLI overrides."""
+    shock = get_behavioural_scenario(args.scenario)
+    updates: dict[str, object] = {
+        "low_ei_quantile": args.low_ei_quantile,
+        "high_ei_quantile": args.high_ei_quantile,
+        "high_capability_quantile": args.high_capability_quantile,
+    }
+    if args.shock_size is not None:
+        updates["shock_size"] = args.shock_size
+    if args.selector is not None:
+        updates["selector_name"] = args.selector
+    return replace(shock, **updates)
 
 
 def build_corrected_input_panel_config(args: argparse.Namespace) -> ABMV3Config:
@@ -859,6 +912,30 @@ def main() -> None:
         )
         for name, path in written_paths.items():
             print(f"[ABM v3 Validation Report] {name}: {path}")
+    elif args.command == "list-behavioural-scenarios":
+        for scenario_name in list_behavioural_scenarios():
+            scenario = get_behavioural_scenario(scenario_name)
+            print(f"{scenario_name}: {scenario.description}")
+    elif args.command == "behavioural-scenario":
+        shock = build_behavioural_scenario_shock(args)
+        runner = BehaviouralLeontiefScenarioRunner(
+            paths=ABMV3Paths(),
+            config=build_behavioural_scenario_config(args),
+        )
+        output = runner.run_year(args.year, args.scenario, shock)
+        for name, path in output["written_paths"].items():
+            print(f"[ABM v3 Behavioural Scenario] {name}: {path}")
+    elif args.command == "behavioural-scenario-range":
+        shock = build_behavioural_scenario_shock(args)
+        runner = BehaviouralLeontiefScenarioRunner(
+            paths=ABMV3Paths(),
+            config=build_behavioural_scenario_config(args),
+        )
+        for year in range(args.start_year, args.end_year + 1):
+            print(f"[ABM v3 Behavioural Scenario] Range progress: year={year}")
+            output = runner.run_year(year, args.scenario, shock)
+            for name, path in output["written_paths"].items():
+                print(f"[ABM v3 Behavioural Scenario] {year} {name}: {path}")
 
 
 if __name__ == "__main__":
