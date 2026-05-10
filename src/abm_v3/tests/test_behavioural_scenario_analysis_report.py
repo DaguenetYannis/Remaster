@@ -7,8 +7,11 @@ import pandas as pd
 
 from src.abm_v3.leontief.scenarios.analysis_report import BehaviouralScenarioAnalysisReportBuilder
 from src.abm_v3.leontief.scenarios.plots import (
+    clean_display_label,
+    display_label_cleaner,
     plot_scenario_output_effect,
     plot_selector_overlap,
+    plot_top_sector_effects,
 )
 from src.abm_v3.paths import ABMV3Paths
 from src.abm_v3.runner import build_parser
@@ -195,6 +198,68 @@ def test_plot_functions_save_validate_and_do_not_mutate() -> None:
         raise AssertionError("Invalid color mode should fail.")
     except ValueError:
         pass
+
+
+def test_display_label_cleaning_is_display_only() -> None:
+    assert clean_display_label("Finacial Intermediation and Business Activities") == "Financial Intermediation and Business Activities"
+    assert clean_display_label("Hotels and Restraurants") == "Hotels and Restaurants"
+    assert clean_display_label("green capabiliity metric") == "green capability metric"
+    assert clean_display_label("high_ei_node_capacity_bottleneck_10") == "High EI capacity bottleneck"
+    assert clean_display_label("capacity bottelneck stress") == "capacity bottleneck stress"
+    assert display_label_cleaner("capacity botleneck stress") == "capacity bottleneck stress"
+
+
+def test_top_effect_plot_uses_billions_without_mutating() -> None:
+    sector = pd.DataFrame(
+        {
+            "scenario_name": ["green_capability_node_demand_expansion_10"],
+            "Sector": ["Finacial Intermediation and Business Activities"],
+            "total_delta_X_realized_sum": [2_000_000_000.0],
+        }
+    )
+    before = sector.copy(deep=True)
+    output_path = toy_paths().behavioural_leontief_scenario_plot_dir / "sector_billions.png"
+
+    fig = plot_top_sector_effects(
+        sector,
+        "green_capability_node_demand_expansion_10",
+        output_path=output_path,
+    )
+
+    assert fig is not None
+    assert output_path.exists()
+    assert fig.axes[0].get_xlabel() == "Total change in realized output, billions"
+    tick_labels = [tick.get_text() for tick in fig.axes[0].get_yticklabels()]
+    assert "Financial Intermediation and Business Activities" in tick_labels
+    pd.testing.assert_frame_equal(sector, before)
+
+
+def test_report_writes_portfolio_heatmap_and_capacity_diagnostic() -> None:
+    paths = toy_paths()
+    write_synthetic_outputs(paths)
+
+    written = BehaviouralScenarioAnalysisReportBuilder(paths, make_plots=True).build(1995, 1996)
+
+    assert "plot_selector_overlap_heatmap_portfolio" in written
+    assert "plot_selector_overlap_portfolio" not in written
+    assert "plot_capacity_bottleneck_diagnostic_research" in written
+    assert written["plot_selector_overlap_heatmap_portfolio"].exists()
+    assert written["plot_capacity_bottleneck_diagnostic_research"].exists()
+
+
+def test_scenario_plot_uses_clean_human_scenario_labels() -> None:
+    summary = pd.DataFrame(
+        {
+            "scenario_name": ["green_capability_node_demand_expansion_10", "high_ei_node_capacity_bottleneck_10"],
+            "mean_pct_delta_realized_output_total": [0.02, 0.0],
+        }
+    )
+
+    fig = plot_scenario_output_effect(summary)
+
+    labels = [tick.get_text() for tick in fig.axes[0].get_yticklabels()]
+    assert "Green capability demand" in labels
+    assert "High EI capacity bottleneck" in labels
 
 
 def test_cli_parser_includes_behavioural_scenario_report() -> None:

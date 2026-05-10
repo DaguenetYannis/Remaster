@@ -238,10 +238,10 @@ class BehaviouralScenarioAnalysisReportBuilder:
             self._top_effect_tables(country, "Country"),
             "",
             "## Capacity Bottleneck Caveat",
-            "If the high-EI capacity bottleneck has weak output effect, this indicates capacity is weakly binding in ABM v3. Adaptive capacity is deferred to ABM v4.",
+            "If the high-EI capacity bottleneck has weak output effect, this indicates capacity is weakly binding in ABM v3. This does not mean high-EI sectors are unimportant; it means the current ABM v3 capacity proxy rarely binds strongly enough for this stress test to propagate. Adaptive capacity is deferred to ABM v4.",
             "",
             "## Readiness for Visual Portfolio",
-            "Good portfolio candidates are the scenario output effect comparison, selector overlap chart, and top sector effects for green capability and transition-pivot scenarios.",
+            "Draft portfolio visual candidates are the scenario output effect comparison, selector overlap heatmap, and top sector effects for green capability and transition-pivot scenarios. These are candidates for refinement, not final portfolio visuals.",
             "",
             "## Caveats",
             "These are not forecasts, do not measure emissions reduction, do not prove green transition, defer EI transition, and treat capacity bottlenecks as exogenous stress tests.",
@@ -259,13 +259,35 @@ class BehaviouralScenarioAnalysisReportBuilder:
             items = [
                 ("plot_output_effect_" + audience, plot_dir / f"scenario_output_effect_global_{start_year}_{end_year}_{audience}.{ext}", plots.plot_scenario_output_effect, (summary,)),
                 ("plot_output_trajectory_" + audience, plot_dir / f"scenario_output_trajectory_global_{start_year}_{end_year}_{audience}.{ext}", plots.plot_scenario_output_trajectory, (by_year,)),
-                ("plot_selector_overlap_" + audience, plot_dir / f"scenario_selector_overlap_{start_year}_{end_year}_{audience}.{ext}", plots.plot_selector_overlap, (selector,)),
             ]
+            if audience == "research":
+                items.append(
+                    (
+                        "plot_selector_overlap_research",
+                        plot_dir / f"scenario_selector_overlap_{start_year}_{end_year}_research.svg",
+                        plots.plot_selector_overlap,
+                        (selector,),
+                    )
+                )
             for key, path, fn, args in items:
                 fig = fn(*args, audience=audience, color_mode=self.color_mode, output_path=path)
                 written[key] = path
                 import matplotlib.pyplot as plt
                 plt.close(fig)
+        if self.audience in {"portfolio", "both"}:
+            heatmap_path = self.paths.behavioural_leontief_scenario_plot_dir / f"scenario_selector_overlap_heatmap_{start_year}_{end_year}_portfolio.png"
+            fig = plots.plot_selector_overlap_heatmap(selector, audience="portfolio", color_mode=self.color_mode, output_path=heatmap_path)
+            written["plot_selector_overlap_heatmap_portfolio"] = heatmap_path
+            import matplotlib.pyplot as plt
+            plt.close(fig)
+        bottleneck_svg = self.paths.behavioural_leontief_scenario_plot_dir / f"scenario_capacity_bottleneck_diagnostic_{start_year}_{end_year}_research.svg"
+        fig = plots.plot_capacity_bottleneck_effect(summary, audience="research", color_mode=self.color_mode, output_path=bottleneck_svg)
+        written["plot_capacity_bottleneck_diagnostic_research"] = bottleneck_svg
+        plt.close(fig)
+        bottleneck_png = self.paths.behavioural_leontief_scenario_plot_dir / f"scenario_capacity_bottleneck_diagnostic_{start_year}_{end_year}_portfolio.png"
+        fig = plots.plot_capacity_bottleneck_effect(summary, audience="portfolio", color_mode=self.color_mode, output_path=bottleneck_png)
+        written["plot_capacity_bottleneck_diagnostic_portfolio"] = bottleneck_png
+        plt.close(fig)
         for scenario_key, scenario_name in [
             ("green_capability", "green_capability_node_demand_expansion_10"),
             ("transition_pivot", "transition_pivot_node_demand_expansion_10"),
@@ -309,16 +331,19 @@ class BehaviouralScenarioAnalysisReportBuilder:
         blocks = []
         for scenario_name, group in df.groupby("scenario_name"):
             top = group.sort_values("rank_within_scenario_by_abs_effect").head(10)
-            blocks.append(f"### {scenario_name}\n\n{self._table(top[[key, 'total_delta_X_realized_sum', 'mean_pct_delta_X_realized_sum', 'years_present']])}")
+            blocks.append(f"### {plots.clean_display_label(scenario_name)}\n\n{self._table(top[[key, 'total_delta_X_realized_sum', 'mean_pct_delta_X_realized_sum', 'years_present']])}")
         return "\n\n".join(blocks)
 
     def _table(self, df: pd.DataFrame) -> str:
         if df.empty:
             return "No rows available."
         display = df.fillna("").copy()
-        rows = ["| " + " | ".join(map(str, display.columns)) + " |", "| " + " | ".join(["---"] * len(display.columns)) + " |"]
+        rows = [
+            "| " + " | ".join(plots.clean_display_label(column) for column in display.columns) + " |",
+            "| " + " | ".join(["---"] * len(display.columns)) + " |",
+        ]
         for _, row in display.iterrows():
-            rows.append("| " + " | ".join(str(row[c]).replace("|", "/") for c in display.columns) + " |")
+            rows.append("| " + " | ".join(plots.clean_display_label(str(row[c]).replace("|", "/")) for c in display.columns) + " |")
         return "\n".join(rows)
 
     def _flag(self, flags: list[dict[str, str]], area: str, severity: str, flag: str, evidence: str, action: str) -> None:
