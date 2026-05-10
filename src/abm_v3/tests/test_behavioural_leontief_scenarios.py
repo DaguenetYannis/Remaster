@@ -16,7 +16,7 @@ from src.abm_v3.leontief.scenarios.registry import get_behavioural_scenario, lis
 from src.abm_v3.leontief.scenarios.runner import BehaviouralLeontiefScenarioRunner
 from src.abm_v3.leontief.scenarios.selectors import GreenNodeSelector
 from src.abm_v3.paths import ABMV3Paths
-from src.abm_v3.runner import build_parser
+from src.abm_v3.runner import build_behavioural_scenario_config, build_parser
 
 
 def labels() -> list[str]:
@@ -139,6 +139,51 @@ def test_scenario_comparison_computes_deltas_and_percent_deltas() -> None:
     assert first["delta_capacity_binding_rounds"] == 1
 
 
+def test_scenario_summary_contains_residual_and_accumulated_fields() -> None:
+    runner = BehaviouralLeontiefScenarioRunner(
+        paths=ABMV3Paths(project_root=Path("tmp") / "scenario_summary_test" / uuid4().hex[:8]),
+        config=ABMV3Config(),
+    )
+    baseline_result = type(
+        "Result",
+        (),
+        {
+            "converged": True,
+            "rounds_used": 2,
+            "final_residual_share": 0.01,
+            "final_residual_total": 1.5,
+            "accumulated_realized_output_total": 100.0,
+        },
+    )()
+    scenario_result = type(
+        "Result",
+        (),
+        {
+            "converged": True,
+            "rounds_used": 3,
+            "final_residual_share": 0.02,
+            "final_residual_total": 2.5,
+            "accumulated_realized_output_total": 110.0,
+        },
+    )()
+
+    summary = runner.build_summary(
+        context(),
+        pd.DataFrame({"shock_type": ["final_demand"], "shock_mode": ["multiplicative"], "Y_baseline": [10.0], "Y_scenario": [11.0]}),
+        baseline_result,
+        scenario_result,
+        pd.DataFrame([{"realized_output_total": 100.0, "desired_output_total": 120.0}]),
+        pd.DataFrame([{"realized_output_total": 110.0, "desired_output_total": 132.0}]),
+    )
+
+    assert summary.loc[0, "baseline_final_residual_share"] == 0.01
+    assert summary.loc[0, "scenario_final_residual_share"] == 0.02
+    assert summary.loc[0, "baseline_final_residual_total"] == 1.5
+    assert summary.loc[0, "scenario_final_residual_total"] == 2.5
+    assert summary.loc[0, "baseline_accumulated_realized_output_total"] == 100.0
+    assert summary.loc[0, "scenario_accumulated_realized_output_total"] == 110.0
+
+
 def test_registry_returns_initial_behavioural_scenarios() -> None:
     expected = {
         "low_ei_node_demand_expansion_10",
@@ -173,3 +218,30 @@ def test_behavioural_scenario_cli_commands_are_registered() -> None:
     assert scenario_args.command == "behavioural-scenario"
     assert range_args.command == "behavioural-scenario-range"
     assert list_args.command == "list-behavioural-scenarios"
+
+
+def test_behavioural_scenario_runtime_cli_options_feed_config() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "behavioural-scenario",
+            "--year",
+            "2016",
+            "--scenario",
+            "green_capability_node_demand_expansion_10",
+            "--tolerance",
+            "0.001",
+            "--max-rounds",
+            "7",
+            "--eta-capacity",
+            "0.25",
+            "--no-node-rounds",
+        ]
+    )
+
+    config = build_behavioural_scenario_config(args)
+
+    assert config.leontief.behavioural_tolerance == 0.001
+    assert config.leontief.behavioural_max_rounds == 7
+    assert config.leontief.behavioural_capacity_eta == 0.25
+    assert not config.leontief.write_behavioural_node_rounds

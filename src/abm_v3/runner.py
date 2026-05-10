@@ -25,6 +25,7 @@ from src.abm_v3.leontief.comparison import LeontiefModeComparator
 from src.abm_v3.leontief.orientation import LeontiefOrientationAuditor
 from src.abm_v3.leontief.outputs import LeontiefOutputWriter
 from src.abm_v3.leontief.propagation import LeontiefPropagationEngine
+from src.abm_v3.leontief.scenarios.analysis_report import BehaviouralScenarioAnalysisReportBuilder
 from src.abm_v3.leontief.scenarios.registry import get_behavioural_scenario, list_behavioural_scenarios
 from src.abm_v3.leontief.scenarios.runner import BehaviouralLeontiefScenarioRunner
 from src.abm_v3.leontief.validation import LeontiefPropagationValidator
@@ -219,6 +220,7 @@ def build_parser() -> argparse.ArgumentParser:
     behavioural_scenario.add_argument("--low-ei-quantile", type=float, default=0.25)
     behavioural_scenario.add_argument("--high-ei-quantile", type=float, default=0.75)
     behavioural_scenario.add_argument("--high-capability-quantile", type=float, default=0.75)
+    add_behavioural_scenario_runtime_arguments(behavioural_scenario)
 
     behavioural_scenario_range = subparsers.add_parser("behavioural-scenario-range")
     behavioural_scenario_range.add_argument("--start-year", type=int, required=True)
@@ -231,9 +233,27 @@ def build_parser() -> argparse.ArgumentParser:
     behavioural_scenario_range.add_argument("--low-ei-quantile", type=float, default=0.25)
     behavioural_scenario_range.add_argument("--high-ei-quantile", type=float, default=0.75)
     behavioural_scenario_range.add_argument("--high-capability-quantile", type=float, default=0.75)
+    add_behavioural_scenario_runtime_arguments(behavioural_scenario_range)
 
     subparsers.add_parser("list-behavioural-scenarios")
+
+    behavioural_scenario_report = subparsers.add_parser("behavioural-scenario-report")
+    behavioural_scenario_report.add_argument("--start-year", type=int, default=1995)
+    behavioural_scenario_report.add_argument("--end-year", type=int, default=2016)
+    behavioural_scenario_report.add_argument("--mode", default="transpose_row_output_fd_without_inventory")
+    behavioural_scenario_report.add_argument("--input-panel-orientation", default="transpose_row_fd_without_inventory")
+    behavioural_scenario_report.add_argument("--audience", choices=["portfolio", "research", "both"], default="both")
+    behavioural_scenario_report.add_argument("--color-mode", choices=["default", "colorblind"], default="default")
+    behavioural_scenario_report.add_argument("--no-plots", action="store_true")
     return parser
+
+
+def add_behavioural_scenario_runtime_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add behavioural propagation runtime overrides to a scenario parser."""
+    parser.add_argument("--tolerance", type=float, default=None)
+    parser.add_argument("--max-rounds", type=int, default=None)
+    parser.add_argument("--eta-capacity", type=float, default=None)
+    parser.add_argument("--no-node-rounds", action="store_true")
 
 
 def run_leontief_year(
@@ -411,6 +431,14 @@ def build_behavioural_scenario_config(args: argparse.Namespace) -> ABMV3Config:
         leontief_mode=args.mode,
         input_panel_orientation=args.input_panel_orientation,
     )
+    if getattr(args, "tolerance", None) is not None:
+        leontief_config = replace(leontief_config, behavioural_tolerance=args.tolerance)
+    if getattr(args, "max_rounds", None) is not None:
+        leontief_config = replace(leontief_config, behavioural_max_rounds=args.max_rounds)
+    if getattr(args, "eta_capacity", None) is not None:
+        leontief_config = replace(leontief_config, behavioural_capacity_eta=args.eta_capacity)
+    if getattr(args, "no_node_rounds", False):
+        leontief_config = replace(leontief_config, write_behavioural_node_rounds=False)
     return replace(config, leontief=leontief_config)
 
 
@@ -936,6 +964,17 @@ def main() -> None:
             output = runner.run_year(year, args.scenario, shock)
             for name, path in output["written_paths"].items():
                 print(f"[ABM v3 Behavioural Scenario] {year} {name}: {path}")
+    elif args.command == "behavioural-scenario-report":
+        written_paths = BehaviouralScenarioAnalysisReportBuilder(
+            paths=ABMV3Paths(),
+            mode=args.mode,
+            input_panel_orientation=args.input_panel_orientation,
+            audience=args.audience,
+            color_mode=args.color_mode,
+            make_plots=not args.no_plots,
+        ).build(start_year=args.start_year, end_year=args.end_year)
+        for name, path in written_paths.items():
+            print(f"[ABM v3 Behavioural Scenario Report] {name}: {path}")
 
 
 if __name__ == "__main__":

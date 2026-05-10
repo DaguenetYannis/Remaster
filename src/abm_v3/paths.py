@@ -207,6 +207,47 @@ class ABMV3Paths:
         return self.behavioural_leontief_scenario_diagnostics_dir / f"metadata_{scenario_name}_{year}.csv"
 
     @property
+    def behavioural_leontief_scenario_analysis_dir(self) -> Path:
+        return self.behavioural_leontief_scenario_dir / "analysis_report"
+
+    @property
+    def behavioural_leontief_scenario_analysis_tables_dir(self) -> Path:
+        return self.behavioural_leontief_scenario_analysis_dir / "tables"
+
+    @property
+    def behavioural_leontief_scenario_analysis_markdown_dir(self) -> Path:
+        return self.behavioural_leontief_scenario_analysis_dir / "markdown"
+
+    @property
+    def behavioural_leontief_scenario_analysis_diagnostics_dir(self) -> Path:
+        return self.behavioural_leontief_scenario_analysis_dir / "diagnostics"
+
+    @property
+    def behavioural_leontief_scenario_plot_dir(self) -> Path:
+        return self.project_root / "outputs" / "plots" / "scenario"
+
+    def behavioural_scenario_analysis_summary_path(self, start_year: int, end_year: int) -> Path:
+        return self.behavioural_leontief_scenario_analysis_tables_dir / f"scenario_analysis_summary_{start_year}_{end_year}.csv"
+
+    def behavioural_scenario_analysis_by_year_path(self, start_year: int, end_year: int) -> Path:
+        return self.behavioural_leontief_scenario_analysis_tables_dir / f"scenario_analysis_by_year_{start_year}_{end_year}.csv"
+
+    def behavioural_scenario_analysis_selector_overlap_path(self, start_year: int, end_year: int) -> Path:
+        return self.behavioural_leontief_scenario_analysis_tables_dir / f"scenario_analysis_selector_overlap_{start_year}_{end_year}.csv"
+
+    def behavioural_scenario_analysis_sector_effects_path(self, start_year: int, end_year: int) -> Path:
+        return self.behavioural_leontief_scenario_analysis_tables_dir / f"scenario_analysis_sector_effects_{start_year}_{end_year}.csv"
+
+    def behavioural_scenario_analysis_country_effects_path(self, start_year: int, end_year: int) -> Path:
+        return self.behavioural_leontief_scenario_analysis_tables_dir / f"scenario_analysis_country_effects_{start_year}_{end_year}.csv"
+
+    def behavioural_scenario_analysis_flags_path(self, start_year: int, end_year: int) -> Path:
+        return self.behavioural_leontief_scenario_analysis_diagnostics_dir / f"scenario_analysis_flags_{start_year}_{end_year}.csv"
+
+    def behavioural_scenario_analysis_markdown_path(self, start_year: int, end_year: int) -> Path:
+        return self.behavioural_leontief_scenario_analysis_markdown_dir / f"scenario_analysis_markdown_{start_year}_{end_year}.md"
+
+    @property
     def ei_transition_dir(self) -> Path:
         return self.abm_v3_output_root / "ei_transition"
 
