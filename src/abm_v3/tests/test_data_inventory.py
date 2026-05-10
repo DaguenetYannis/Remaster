@@ -1,0 +1,151 @@
+from __future__ import annotations
+
+from pathlib import Path
+from uuid import uuid4
+
+import pandas as pd
+import pytest
+
+from src.abm_v3.data_inventory import (
+    build_data_inventory,
+    classify_file_group,
+    classify_variable_semantics,
+    inspect_file,
+)
+from src.abm_v3.runner import build_parser
+
+
+def toy_root() -> Path:
+    """Create a small workspace-local test data root."""
+    root = Path("tmp") / "abm_v3_data_inventory_tests" / uuid4().hex[:8] / "data"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def write_toy_inventory_files(root: Path) -> None:
+    """Write small representative inventory files."""
+    input_dir = root / "abm_v3" / "inputs"
+    ei_dir = root / "abm_v3" / "ei_transition" / "inputs"
+    scenario_dir = root / "abm_v3" / "leontief" / "behavioural" / "scenarios" / "analysis_report"
+    legacy_dir = root / "abm"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    ei_dir.mkdir(parents=True, exist_ok=True)
+    scenario_dir.mkdir(parents=True, exist_ok=True)
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+
+    pd.DataFrame(
+        {
+            "country_sector": ["AAA | Agriculture", "BBB | Manufacturing"],
+            "Year": [1995, 1995],
+            "EI": [0.4, 0.7],
+            "green_capability_export_share": [0.2, 0.5],
+            "X_observed": [100.0, 200.0],
+        }
+    ).to_parquet(input_dir / "abm_v3_historical_panel_1995_2016_transpose_row_fd_without_inventory.parquet")
+
+    pd.DataFrame(
+        {
+            "country_sector": ["AAA | Agriculture"],
+            "Year": [1996],
+            "EI": [0.35],
+            "network_green_ness": [0.6],
+        }
+    ).to_parquet(ei_dir / "ei_transition_panel_1995_2016.parquet")
+
+    pd.DataFrame(
+        {
+            "scenario_name": ["green_capability_push"],
+            "country_sector": ["AAA | Agriculture"],
+            "Year": [2016],
+            "delta_X": [4.0],
+        }
+    ).to_csv(scenario_dir / "scenario_effects.csv", index=False)
+
+    pd.DataFrame({"country_sector": ["AAA | Agriculture"], "Year": [1995], "output": [100.0]}).to_parquet(
+        legacy_dir / "simulation_output.parquet"
+    )
+
+
+def test_inventory_discovers_csv_and_parquet_files() -> None:
+    root = toy_root()
+    write_toy_inventory_files(root)
+
+    written = build_data_inventory(root=root, output_dir=root / "abm_v3" / "data_inventory")
+    inventory = pd.read_csv(written["data_inventory"])
+
+    assert inventory["extension"].isin([".csv"]).any()
+    assert inventory["extension"].isin([".parquet"]).any()
+    assert "abm_v3_input_panel" in inventory["file_group"].tolist()
+
+
+def test_parquet_schema_is_inspected_without_full_loading() -> None:
+    pytest.importorskip("pyarrow")
+    root = toy_root()
+    write_toy_inventory_files(root)
+    path = root / "abm_v3" / "inputs" / "abm_v3_historical_panel_1995_2016_transpose_row_fd_without_inventory.parquet"
+
+    inspection = inspect_file(path, base_root=root, sample_rows=1)
+
+    assert inspection.row_count == 2
+    assert inspection.column_count == 5
+    assert inspection.sample is not None
+    assert len(inspection.sample) == 1
+    assert "parquet schema inspected from metadata" in inspection.notes
+
+
+def test_semantic_classification_recognizes_key_variables() -> None:
+    assert classify_variable_semantics("country_sector") == "identifier"
+    assert classify_variable_semantics("Year") == "time"
+    assert classify_variable_semantics("EI") == "emissions_intensity"
+    assert classify_variable_semantics("green_capability_export_share") == "green_capability"
+    assert classify_variable_semantics("X_observed") == "production"
+    assert classify_variable_semantics("scenario_name") == "scenario"
+
+
+def test_file_group_classifies_current_and_legacy_sources() -> None:
+    assert (
+        classify_file_group(Path("abm_v3/inputs/abm_v3_historical_panel_1995_2016_transpose_row_fd_without_inventory.parquet"))
+        == "abm_v3_input_panel"
+    )
+    assert classify_file_group(Path("abm_v3/ei_transition/inputs/ei_transition_panel_1995_2016.parquet")) == "abm_v3_ei_transition"
+    assert (
+        classify_file_group(Path("abm_v3/leontief/behavioural/scenarios/analysis_report/scenario_effects.csv"))
+        == "abm_v3_scenario_analysis"
+    )
+    assert classify_file_group(Path("abm/simulation_output.parquet")) == "legacy_abm"
+
+
+def test_markdown_catalog_is_written() -> None:
+    root = toy_root()
+    write_toy_inventory_files(root)
+
+    written = build_data_inventory(root=root, output_dir=root / "abm_v3" / "data_inventory")
+    markdown = written["catalog"].read_text(encoding="utf-8")
+
+    assert "# ABM v3 Data Catalog and Visual Use Map" in markdown
+    assert "Authoritative Current ABM v3 Sources" in markdown
+
+
+def test_visual_use_map_includes_all_five_3d_cubes() -> None:
+    root = toy_root()
+    write_toy_inventory_files(root)
+
+    written = build_data_inventory(root=root, output_dir=root / "abm_v3" / "data_inventory")
+    visual_map = pd.read_csv(written["visual_use_map"])
+    cube_names = set(visual_map.loc[visual_map["visual_family"].str.startswith("3D phase-space cubes"), "visual_family"])
+
+    assert "3D phase-space cubes: Green Transition Readiness Cube" in cube_names
+    assert "3D phase-space cubes: Brown Lock-in Cube" in cube_names
+    assert "3D phase-space cubes: Productive Ecosystem Transition Cube" in cube_names
+    assert "3D phase-space cubes: Production-Safe Greening Cube" in cube_names
+    assert "3D phase-space cubes: Scenario Perturbation Cube" in cube_names
+
+
+def test_data_inventory_cli_command_is_registered() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(["data-inventory", "--focus", "abm_v3", "--sample-rows", "3"])
+
+    assert args.command == "data-inventory"
+    assert args.focus == "abm_v3"
+    assert args.sample_rows == 3

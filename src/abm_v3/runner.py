@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from src.abm_v3.config import ABMV3Config
+from src.abm_v3.data_inventory import build_data_inventory
 from src.abm_v3.data_loader import ABMV3DataLoader
 from src.abm_v3.diagnostics.hypothesis_reports import HypothesisReportGenerator
 from src.abm_v3.input_panel_builder import ABMV3InputPanelBuilder, CorrectedOrientationInputPanelBuilder
@@ -245,6 +246,14 @@ def build_parser() -> argparse.ArgumentParser:
     behavioural_scenario_report.add_argument("--audience", choices=["portfolio", "research", "both"], default="both")
     behavioural_scenario_report.add_argument("--color-mode", choices=["default", "colorblind"], default="default")
     behavioural_scenario_report.add_argument("--no-plots", action="store_true")
+
+    data_inventory = subparsers.add_parser("data-inventory")
+    data_inventory.add_argument("--root", default="data")
+    data_inventory.add_argument("--focus", choices=["all", "abm_v3"], default="abm_v3")
+    data_inventory.add_argument("--sample-rows", type=int, default=5)
+    data_inventory.add_argument("--max-files", type=int, default=None)
+    data_inventory.add_argument("--include-raw", action="store_true")
+    data_inventory.add_argument("--output-dir", default="data/abm_v3/data_inventory")
     return parser
 
 
@@ -975,6 +984,17 @@ def main() -> None:
         ).build(start_year=args.start_year, end_year=args.end_year)
         for name, path in written_paths.items():
             print(f"[ABM v3 Behavioural Scenario Report] {name}: {path}")
+    elif args.command == "data-inventory":
+        written_paths = build_data_inventory(
+            root=args.root,
+            focus=args.focus,
+            sample_rows=args.sample_rows,
+            max_files=args.max_files,
+            include_raw=args.include_raw,
+            output_dir=args.output_dir,
+        )
+        for name, path in written_paths.items():
+            print(f"[ABM v3 Data Inventory] {name}: {path}")
 
 
 if __name__ == "__main__":
