@@ -291,6 +291,13 @@ def build_parser() -> argparse.ArgumentParser:
     phase_space_plots.add_argument("--plot-2d", action=argparse.BooleanOptionalAction, default=True)
     phase_space_plots.add_argument("--plot-vector-fields", action=argparse.BooleanOptionalAction, default=True)
     phase_space_plots.add_argument("--top-n", type=int, default=25)
+    phase_space_plots.add_argument("--title-mode", choices=["theory", "technical"], default="theory")
+    phase_space_plots.add_argument("--top-sector-n", type=int, default=8)
+    phase_space_plots.add_argument("--top-node-n", type=int, default=10)
+    phase_space_plots.add_argument("--research-top-node-n", type=int, default=25)
+    phase_space_plots.add_argument("--mark-years", default="1995,2000,2008,2016")
+    phase_space_plots.add_argument("--validate-vector-fields", action=argparse.BooleanOptionalAction, default=True)
+    phase_space_plots.add_argument("--write-movement-diagnostics", action=argparse.BooleanOptionalAction, default=True)
     phase_space_plots.add_argument("--no-global", action="store_true")
     phase_space_plots.add_argument("--no-sector", action="store_true")
     phase_space_plots.add_argument("--no-node", action="store_true")
@@ -1056,6 +1063,13 @@ def main() -> None:
             plot_2d=args.plot_2d,
             plot_vector_fields=args.plot_vector_fields,
             top_n=args.top_n,
+            top_sector_n=args.top_sector_n,
+            top_node_n=args.top_node_n,
+            research_top_node_n=args.research_top_node_n,
+            title_mode=args.title_mode,
+            mark_years=tuple(int(token.strip()) for token in str(args.mark_years).split(",") if token.strip()),
+            validate_vector_fields=args.validate_vector_fields,
+            write_movement_diagnostics=args.write_movement_diagnostics,
             include_global=not args.no_global,
             include_sector=not args.no_sector,
             include_node=not args.no_node,
