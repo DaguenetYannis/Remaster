@@ -33,6 +33,7 @@ from src.abm_v3.leontief.validation import LeontiefPropagationValidator
 from src.abm_v3.leontief.viability import LeontiefViabilityAnalyzer
 from src.abm_v3.model import ABMV3Model
 from src.abm_v3.paths import ABMV3Paths
+from src.abm_v3.phase_space.state_panel import ABMV3PhaseSpaceStatePanelBuilder
 from src.abm_v3.real_data_smoke_test import RealDataSmokeTester
 from src.abm_v3.scenarios.registry import list_scenarios
 from src.abm_v3.validation_report import ABMV3ValidationReportBuilder
@@ -254,6 +255,22 @@ def build_parser() -> argparse.ArgumentParser:
     data_inventory.add_argument("--max-files", type=int, default=None)
     data_inventory.add_argument("--include-raw", action="store_true")
     data_inventory.add_argument("--output-dir", default="data/abm_v3/data_inventory")
+
+    phase_space_state_panel = subparsers.add_parser("phase-space-state-panel")
+    phase_space_state_panel.add_argument("--start-year", type=int, default=1995)
+    phase_space_state_panel.add_argument("--end-year", type=int, default=2016)
+    phase_space_state_panel.add_argument("--output-dir", default="data/abm_v3/phase_space")
+    phase_space_state_panel.add_argument(
+        "--base-panel",
+        default="data/abm_v3/inputs/abm_v3_historical_panel_1995_2016_transpose_row_fd_without_inventory.parquet",
+    )
+    phase_space_state_panel.add_argument(
+        "--include-ei-transition",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    phase_space_state_panel.add_argument("--include-scenario-overlays", action="store_true", default=False)
+    phase_space_state_panel.add_argument("--strict", action="store_true", default=False)
     return parser
 
 
@@ -995,6 +1012,16 @@ def main() -> None:
         )
         for name, path in written_paths.items():
             print(f"[ABM v3 Data Inventory] {name}: {path}")
+    elif args.command == "phase-space-state-panel":
+        written_paths = ABMV3PhaseSpaceStatePanelBuilder(
+            base_panel=args.base_panel,
+            output_dir=args.output_dir,
+            include_ei_transition=args.include_ei_transition,
+            include_scenario_overlays=args.include_scenario_overlays,
+            strict=args.strict,
+        ).build(start_year=args.start_year, end_year=args.end_year)
+        for name, path in written_paths.items():
+            print(f"[ABM v3 Phase Space] {name}: {path}")
 
 
 if __name__ == "__main__":

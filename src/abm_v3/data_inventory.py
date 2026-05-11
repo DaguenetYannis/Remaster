@@ -73,22 +73,26 @@ def build_data_inventory(
     inventory = pd.DataFrame([build_inventory_row(inspection) for inspection in inspections])
     variables = pd.DataFrame(build_variable_rows(inspections))
     visual_map = pd.DataFrame(build_visual_use_map_rows())
+    semantic_map = pd.DataFrame(build_semantic_variable_map_rows())
     catalog = build_markdown_catalog(inventory, variables, visual_map)
 
     inventory_path = output_path / "data_inventory.csv"
     variables_path = output_path / "variable_inventory.csv"
     visual_map_path = output_path / "visual_use_map.csv"
+    semantic_map_path = output_path / "abm_v3_semantic_variable_map.csv"
     catalog_path = output_path / "abm_v3_data_catalog.md"
 
     inventory.to_csv(inventory_path, index=False)
     variables.to_csv(variables_path, index=False)
     visual_map.to_csv(visual_map_path, index=False)
+    semantic_map.to_csv(semantic_map_path, index=False)
     catalog_path.write_text(catalog, encoding="utf-8")
 
     return {
         "data_inventory": inventory_path,
         "variable_inventory": variables_path,
         "visual_use_map": visual_map_path,
+        "semantic_variable_map": semantic_map_path,
         "catalog": catalog_path,
     }
 
@@ -445,6 +449,7 @@ def classify_data_layer(relative_path: Path, file_group: str, extension: str) ->
 def classify_status(relative_path: Path, file_group: str, data_layer: str) -> str:
     """Classify current authority and diagnostic status."""
     path_text = relative_path.as_posix().lower()
+    name = relative_path.name.lower()
     if file_group in {"raw_eora", "atlas_raw"}:
         return "raw_source"
     if file_group in {"processed_eora", "atlas_processed"}:
@@ -452,19 +457,27 @@ def classify_status(relative_path: Path, file_group: str, data_layer: str) -> st
     if file_group == "legacy_abm":
         return "legacy"
     if file_group == "abm_v3_input_panel" and "transpose_row_fd_without_inventory" in path_text:
-        return "authoritative_current"
+        return "authoritative_state_source"
     if file_group == "abm_v3_input_panel":
         return "intermediate"
-    if file_group == "abm_v3_leontief_behavioural":
-        return "authoritative_current"
+    if file_group == "abm_v3_ei_transition" and "/inputs/" in path_text and "ei_transition_panel" in name:
+        return "authoritative_state_source"
+    if file_group == "abm_v3_ei_transition" and "/predictions/" in path_text:
+        return "current_diagnostic"
     if file_group == "abm_v3_scenario_analysis":
         return "current_scenario_output"
     if file_group == "abm_v3_scenarios":
         return "current_scenario_output"
+    if file_group == "abm_v3_leontief_behavioural":
+        if "node_comparison" in name:
+            return "authoritative_model_output"
+        return "current_diagnostic"
     if file_group == "abm_v3_validation_report":
         return "current_diagnostic"
     if file_group == "abm_v3_ei_transition":
         return "current_diagnostic"
+    if file_group == "plots" or data_layer == "visual_output":
+        return "visual_output"
     if data_layer == "diagnostic":
         return "current_diagnostic"
     return "unclear"
@@ -556,8 +569,12 @@ def recommend_file_use(
 ) -> str:
     """Recommend a file-level use."""
     categories = set(semantic_categories)
-    if status == "authoritative_current" and file_group == "abm_v3_input_panel":
+    if status == "authoritative_state_source" and file_group == "abm_v3_input_panel":
         return "current ABM v3 historical state panel; best base for country-sector phase-space trajectories"
+    if status == "authoritative_state_source" and file_group == "abm_v3_ei_transition":
+        return "EI transition panel; prime source for EI movement and vector-field diagnostics after schema validation"
+    if status == "authoritative_model_output":
+        return "current validated model output; useful for validation and propagation interpretation, not primary historical state construction"
     if file_group == "atlas_processed":
         return "capability and product-space variables; join to ABM v3 panel by country-sector and year when available"
     if file_group == "abm_v3_leontief_behavioural":
@@ -586,8 +603,12 @@ def recommend_phase_space_use(
     """Recommend whether and how a file can support phase-space plotting."""
     categories = set(semantic_categories)
     has_node_time = {"identifier", "time"}.issubset(categories)
-    if status == "authoritative_current" and has_node_time:
+    if status == "authoritative_state_source" and file_group == "abm_v3_input_panel" and has_node_time:
         return "primary state trajectory source"
+    if status == "authoritative_state_source" and file_group == "abm_v3_ei_transition" and has_node_time:
+        return "EI movement/vector-field diagnostic source"
+    if status == "authoritative_model_output":
+        return "validated model-output context, not primary state source"
     if file_group == "atlas_processed":
         return "capability axis candidate after joining to country-sector-year state panel"
     if file_group == "abm_v3_ei_transition" and "emissions_intensity" in categories:
@@ -725,13 +746,119 @@ def variable_notes(semantic_category: str) -> str:
     return ""
 
 
+def build_semantic_variable_map_rows() -> list[dict[str, str]]:
+    """Build the curated ABM v3 semantic variable map for methods and plotting."""
+    state_panel = "data/abm_v3/inputs/abm_v3_historical_panel_1995_2016_transpose_row_fd_without_inventory.parquet"
+    phase_panel = "data/abm_v3/phase_space/abm_v3_phase_space_state_panel_1995_2016.parquet"
+    ei_panel = "data/abm_v3/ei_transition/inputs/ei_transition_panel_1995_2016.parquet"
+    ei_predictions = "data/abm_v3/ei_transition/predictions/ei_transition_predictions_1995_2016.parquet"
+    atlas_panel = "data/atlas/processed/atlas_eora26_sector_capabilities_1995_2016.parquet"
+    scenario_outputs = "data/abm_v3/leontief/behavioural/scenarios/analysis_report/"
+    diagnostics = "data/abm_v3/diagnostics/; data/abm_v3/leontief/behavioural/diagnostics/"
+
+    rows = [
+        semantic_row("country_sector", "country_sector; node", "identifier", "Stable country-sector node key used to define production-system units.", state_panel, "", "country_sector-year", "annual", "high", "high", "high", "high", "trace_key", "Defines the node whose movement is tracked through state space.", "Must remain stable across joins; do not infer missing node labels silently.", "required"),
+        semantic_row("Country", "Country; country", "identifier", "Country label for aggregation, faceting, and interpretation.", state_panel, atlas_panel, "country_sector-year", "annual", "medium", "high", "low", "high", "facet", "Separates national production-system context from sector identity.", "May be absent if only compound country_sector labels are available.", "high"),
+        semantic_row("Country_detail", "Country_detail; country_detail", "identifier", "Detailed country label when harmonized country metadata are available.", state_panel, atlas_panel, "country_sector-year", "annual", "low", "medium", "low", "high", "label", "Improves interpretation without changing the node definition.", "Not required for state-space construction.", "medium"),
+        semantic_row("Sector", "Sector; sector", "identifier", "Eora26 sector label for sector-level aggregation and interpretation.", state_panel, atlas_panel, "country_sector-year", "annual", "medium", "high", "low", "high", "facet", "Identifies sectoral location of transition opportunities and lock-in.", "Sector names must be validated after joins.", "high"),
+        semantic_row("Category", "Category; category", "identifier", "Broad sector or node category used for grouping and visual filtering.", state_panel, atlas_panel, "country_sector-year", "annual", "low", "medium", "low", "medium", "facet", "Supports readable grouping of node trajectories.", "Category systems may differ across sources.", "medium"),
+        semantic_row("Year", "Year; year", "time", "Calendar year of the observed state.", state_panel, ei_panel, "country_sector-year", "annual", "high", "high", "high", "high", "trajectory_time", "Orders historical movement and year-to-year transition vectors.", "Must be integer-like and within the requested build window.", "required"),
+        semantic_row("X_observed", "X_observed; output; production", "production", "Observed production scale for the country-sector node.", state_panel, diagnostics, "country_sector-year", "annual", "high", "high", "medium", "high", "weight_or_x_axis", "Measures production scale, not emissions or greenness.", "Use as default trajectory weight; validate units before cross-source comparison.", "required"),
+        semantic_row("log_X_observed", "log_X_observed", "production", "Log-transformed observed production scale, computed as log1p(X_observed).", phase_panel, state_panel, "country_sector-year", "annual", "high", "high", "medium", "high", "x_axis", "Supports production-safe greening views without letting very large nodes dominate geometry.", "Derived variable; only valid when X_observed is numeric.", "high"),
+        semantic_row("X_realized", "X_realized; realized_output", "production", "Model-realized production after Leontief propagation or scenario response.", diagnostics, scenario_outputs, "country_sector-year or country_sector-scenario-year", "annual", "low", "medium", "low", "high", "validation_or_overlay", "Represents model response, not observed historical state.", "Do not use as baseline historical production.", "medium"),
+        semantic_row("X_desired", "X_desired; desired_output", "production", "Desired or unconstrained production before propagation constraints.", diagnostics, scenario_outputs, "country_sector-year or country_sector-scenario-year", "annual", "low", "medium", "low", "medium", "diagnostic", "Helps distinguish demand pressure from realized production.", "Diagnostic only unless explicitly validated.", "medium"),
+        semantic_row("final_demand_total", "final_demand_total; total_final_demand", "final_demand", "Total final demand associated with the node.", state_panel, diagnostics, "country_sector-year", "annual", "medium", "medium", "low", "high", "context", "Demand context for production-network propagation.", "Not a substitute for production scale.", "medium"),
+        semantic_row("Y_final_demand", "Y_final_demand; Y; final_demand", "final_demand", "Final-demand vector value used by input-output construction.", state_panel, diagnostics, "country_sector-year", "annual", "medium", "medium", "low", "high", "context", "Demand-side driver of production-network accounting.", "Column naming varies across input-output outputs.", "medium"),
+        semantic_row("emissions_observed", "emissions_observed; emissions; CO2", "emissions", "Observed total emissions attributable to the node.", phase_panel, state_panel, "country_sector-year", "annual", "high", "high", "medium", "high", "weight_or_color", "Measures total carbon scale, distinct from emissions intensity.", "May be derived as EI times X_observed when not directly observed.", "high"),
+        semantic_row("log_emissions_observed", "log_emissions_observed", "emissions", "Log-transformed total emissions, computed as log1p(emissions_observed).", phase_panel, state_panel, "country_sector-year", "annual", "medium", "high", "low", "high", "color_or_size", "Compresses emissions scale for readable comparison.", "Derived variable; only meaningful when emissions are non-negative.", "medium"),
+        semantic_row("EI", "EI; emissions_intensity; emission_intensity", "emissions_intensity", "Emissions intensity of production for the node.", state_panel, ei_panel, "country_sector-year", "annual", "high", "high", "high", "high", "y_axis_or_color", "Measures carbon intensity, not total emissions.", "Positive values are required for log_EI and EI-reduction movement.", "required"),
+        semantic_row("log_EI", "log_EI", "emissions_intensity", "Natural log of emissions intensity for positive EI values.", phase_panel, ei_panel, "country_sector-year", "annual", "high", "high", "high", "high", "state_or_delta_base", "Makes proportional emissions-intensity change explicit.", "Undefined for zero or negative EI; missing values must remain visible.", "high"),
+        semantic_row("g_local", "g_local; local_green_ness; greenness", "local_green_ness", "Local green-ness proxy derived from the node's own emissions intensity.", phase_panel, state_panel, "country_sector-year", "annual", "high", "high", "high", "high", "green_up_axis", "Higher values indicate lower local carbon intensity, distinct from network greenness.", "Can be derived as 1/(1+EI); it is not proof of green capability.", "required"),
+        semantic_row("green_capability_export_share", "green_capability_export_share", "green_capability", "Share of exports linked to green capabilities or green products.", atlas_panel, state_panel, "country_sector-year", "annual", "high", "high", "high", "high", "x_axis", "Proxy for green productive capability, not proof of low-carbon production.", "Requires validated Atlas-to-Eora join.", "high"),
+        semantic_row("green_capability_share", "green_capability_share", "green_capability", "Share of identified capabilities that are green-relevant.", atlas_panel, state_panel, "country_sector-year", "annual", "medium", "high", "medium", "high", "context", "Alternative green-capability measure for robustness.", "Definition may differ from export-weighted capability.", "medium"),
+        semantic_row("green_capability_readiness", "green_capability_readiness; capability_readiness", "green_capability", "Readiness proxy for moving into green capability space.", atlas_panel, state_panel, "country_sector-year", "annual", "high", "high", "high", "high", "readiness_axis", "Measures capability adjacency, not realized transition.", "Use cautiously as current capacity proxy, not adaptive capacity.", "high"),
+        semantic_row("capability_export_weighted_pci", "capability_export_weighted_pci", "economic_complexity", "Export-weighted complexity of the node's capability basket.", atlas_panel, state_panel, "country_sector-year", "annual", "medium", "high", "medium", "high", "context", "Places green capability in broader product-complexity space.", "Requires product-space methodology notes in LaTeX reference.", "medium"),
+        semantic_row("capability_mean_pci", "capability_mean_pci", "economic_complexity", "Mean product complexity associated with the node's capability basket.", atlas_panel, state_panel, "country_sector-year", "annual", "medium", "high", "medium", "high", "context", "Captures complexity environment around possible transition paths.", "Not itself a green metric.", "medium"),
+        semantic_row("capability_ecosystem_exposure", "capability_ecosystem_exposure; ecosystem_exposure", "ecosystem_readiness", "Exposure to nearby capability ecosystems that may support transition.", atlas_panel, state_panel, "country_sector-year", "annual", "high", "high", "high", "high", "y_axis", "Represents product-space readiness rather than observed greening.", "Missing unless Atlas-derived ecosystem variables have been joined.", "high"),
+        semantic_row("general_complexity", "general_complexity; ECI; complexity", "economic_complexity", "General economic-complexity context for the node or country-sector environment.", atlas_panel, state_panel, "country_sector-year", "annual", "medium", "high", "medium", "high", "context", "Broader productive sophistication control.", "May be country-level rather than country-sector-level.", "medium"),
+        semantic_row("network_green_exposure", "network_green_exposure; network_green_ness", "network_green_ness", "Exposure to green-ness through the production network around the node.", phase_panel, diagnostics, "country_sector-year", "annual", "high", "high", "high", "high", "z_axis", "Network-embedded green-ness, distinct from local green-ness.", "Missing if no validated network green-ness layer exists.", "high"),
+        semantic_row("g_in_network", "g_in_network; incoming_green", "network_green_ness", "Input-side or upstream network green-ness exposure.", diagnostics, phase_panel, "country_sector-year", "annual", "high", "high", "medium", "high", "z_axis", "Captures green-ness of suppliers or incoming production links.", "Direction depends on validated input-output orientation.", "medium"),
+        semantic_row("g_out_network", "g_out_network; outgoing_green", "network_green_ness", "Output-side or downstream network green-ness exposure.", diagnostics, phase_panel, "country_sector-year", "annual", "high", "high", "medium", "high", "z_axis", "Captures green-ness of buyers or downstream production links.", "Direction depends on validated input-output orientation.", "medium"),
+        semantic_row("recursive_green", "recursive_green; recursive_green_ness", "network_green_ness", "Recursive network measure of green exposure through indirect links.", diagnostics, phase_panel, "country_sector-year", "annual", "high", "high", "medium", "high", "z_axis", "Measures embedded green position in the network, not local emissions intensity.", "Requires method notes on recursion and normalization.", "medium"),
+        semantic_row("pagerank", "pagerank; PageRank", "centrality", "Directed network centrality of the country-sector node.", diagnostics, phase_panel, "country_sector-year", "annual", "medium", "high", "medium", "high", "context", "Identifies influential production-network positions.", "Centrality alone is not brown lock-in.", "medium"),
+        semantic_row("eigenvector_centrality", "eigenvector_centrality", "centrality", "Centrality based on connections to other central nodes.", diagnostics, phase_panel, "country_sector-year", "annual", "medium", "high", "medium", "high", "context", "Captures embedded influence in the production network.", "Depends on graph construction and orientation.", "medium"),
+        semantic_row("reverse_eigenvector_centrality", "reverse_eigenvector_centrality", "centrality", "Eigenvector centrality computed on the reversed network orientation.", diagnostics, phase_panel, "country_sector-year", "annual", "medium", "high", "medium", "high", "context", "Separates upstream and downstream embeddedness.", "Interpret only with explicit orientation notes.", "medium"),
+        semantic_row("brown_centrality", "brown_centrality; embodied_carbon_centrality", "brown_centrality", "Centrality weighted by brown or carbon-intensive network exposure.", diagnostics, phase_panel, "country_sector-year", "annual", "high", "high", "medium", "high", "x_axis", "Proxy for brown lock-in in the network, distinct from own EI.", "Missing unless validated brown-centrality diagnostics exist.", "high"),
+        semantic_row("K", "K; capacity", "capacity", "Capacity proxy used by behavioural production propagation.", state_panel, diagnostics, "country_sector-year", "annual", "medium", "medium", "low", "high", "context", "Current production capacity proxy, not adaptive transition capacity.", "Do not interpret as investment capacity.", "medium"),
+        semantic_row("capacity_stress", "capacity_stress; capacity_utilization", "capacity", "Degree to which realized or desired production approaches capacity.", phase_panel, diagnostics, "country_sector-year", "annual", "medium", "medium", "low", "medium", "diagnostic", "Shows production constraint pressure around transition candidates.", "May be derived and model-specific.", "medium"),
+        semantic_row("capacity_binding", "capacity_binding; binding_capacity", "capacity", "Indicator that capacity constraints bind in propagation.", diagnostics, phase_panel, "country_sector-year", "annual", "low", "medium", "low", "medium", "diagnostic", "Flags constrained production response, not green-transition success.", "Diagnostic only.", "low"),
+        semantic_row("capacity_to_observed_ratio", "capacity_to_observed_ratio", "capacity", "Ratio of capacity proxy to observed production.", phase_panel, state_panel, "country_sector-year", "annual", "medium", "medium", "low", "high", "context", "Identifies output scale relative to current capacity proxy.", "Derived only when K and X_observed are available.", "medium"),
+        semantic_row("rEI", "rEI; EI_reduction; reduction_log_EI", "ei_transition", "Year-to-year reduction in log emissions intensity.", phase_panel, ei_panel, "country_sector-year transition", "annual transition", "high", "high", "high", "high", "vector_component", "Positive values indicate declining emissions intensity.", "Computed as log_EI - log_EI_next; last year has no next-year value.", "high"),
+        semantic_row("predicted_rEI", "predicted_rEI; predicted_delta_log_EI", "ei_transition", "Predicted EI reduction from the EI transition learning model.", ei_predictions, ei_panel, "country_sector-year transition", "annual transition", "medium", "medium", "high", "high", "vector_prediction", "Model-predicted movement, not observed transition.", "Use only as diagnostic or vector-field prediction layer.", "medium"),
+        semantic_row("delta_log_EI", "delta_log_EI", "ei_transition", "Forward change in log emissions intensity.", phase_panel, ei_panel, "country_sector-year transition", "annual transition", "high", "high", "high", "high", "vector_component", "Negative values indicate decreasing emissions intensity.", "Sign convention differs from rEI.", "high"),
+        semantic_row("delta_g_local", "delta_g_local", "ei_transition", "Forward change in local green-ness.", phase_panel, ei_panel, "country_sector-year transition", "annual transition", "high", "high", "high", "high", "vector_component", "Positive values indicate local greening under the g_local proxy.", "Only valid when current and next-year g_local are available.", "high"),
+        semantic_row("delta_network_green_exposure", "delta_network_green_exposure", "ei_transition", "Forward change in network green exposure.", phase_panel, diagnostics, "country_sector-year transition", "annual transition", "high", "high", "high", "high", "vector_component", "Shows movement in network-embedded green-ness.", "Missing until network exposure is present in the state panel.", "high"),
+        semantic_row("scenario_name", "scenario_name; scenario", "scenario_response", "Registered scenario identifier for perturbation outputs.", scenario_outputs, "", "country_sector-scenario-year", "annual or scenario run", "low", "medium", "low", "high", "overlay_facet", "Labels production perturbation experiments.", "Not part of baseline historical trajectory.", "medium"),
+        semantic_row("selector_name", "selector_name; selector", "scenario_response", "Scenario selector or transition archetype used to choose shocked nodes.", scenario_outputs, "", "country_sector-scenario-year", "annual or scenario run", "low", "medium", "low", "high", "overlay_facet", "Explains why nodes were included in a perturbation.", "Selector membership is not observed transition evidence.", "medium"),
+        semantic_row("shock_size", "shock_size", "scenario_response", "Magnitude of imposed scenario perturbation.", scenario_outputs, "", "scenario-year", "annual or scenario run", "low", "medium", "low", "high", "overlay_parameter", "Parameterizes perturbation strength.", "Do not compare to historical greening without scenario notes.", "medium"),
+        semantic_row("delta_X_realized", "delta_X_realized; delta_X", "scenario_response", "Change in model-realized production under a scenario.", scenario_outputs, diagnostics, "country_sector-scenario-year", "annual or scenario run", "low", "medium", "low", "high", "overlay_response", "Production response layer, not full transition dynamics.", "Keep separate from observed X_observed movement.", "medium"),
+        semantic_row("pct_delta_X_realized", "pct_delta_X_realized; pct_delta_X", "scenario_response", "Percentage change in realized production under a scenario.", scenario_outputs, diagnostics, "country_sector-scenario-year", "annual or scenario run", "low", "medium", "low", "high", "overlay_response", "Scale-normalized production perturbation response.", "Undefined or unstable for near-zero baselines.", "medium"),
+        semantic_row("selected_node_flags", "selected_node; is_selected; selector_flag", "scenario_response", "Boolean flags identifying scenario-selected nodes.", scenario_outputs, diagnostics, "country_sector-scenario-year", "annual or scenario run", "low", "medium", "low", "medium", "overlay_filter", "Marks transition archetypes for scenario overlays.", "Not a historical state variable.", "low"),
+        semantic_row("converged", "converged", "validation", "Whether a propagation or validation routine converged.", diagnostics, scenario_outputs, "year or country_sector-year", "annual", "low", "low", "low", "high", "diagnostic", "Supports model trust and caveats.", "Not an economic state coordinate.", "medium"),
+        semantic_row("rounds_used", "rounds_used; rounds", "validation", "Number of propagation rounds used before stopping.", diagnostics, scenario_outputs, "year or country_sector-year", "annual", "low", "low", "low", "medium", "diagnostic", "Shows computational difficulty of propagation.", "Not an economic state coordinate.", "low"),
+        semantic_row("final_residual_share", "final_residual_share; residual_share", "validation", "Remaining residual as a share of the target quantity.", diagnostics, scenario_outputs, "year or country_sector-year", "annual", "low", "low", "low", "high", "diagnostic", "Quantifies unresolved propagation mismatch.", "Use only in validation panels.", "medium"),
+        semantic_row("output_validation_loss", "output_validation_loss; validation_loss", "validation", "Loss metric comparing model output to observed output.", diagnostics, "", "year or validation split", "annual or split", "low", "low", "low", "high", "diagnostic", "Summarizes historical reproduction quality.", "Metric definition must be reported.", "medium"),
+        semantic_row("absolute_percentage_error", "absolute_percentage_error; APE", "validation", "Absolute percentage error between modeled and observed production.", diagnostics, "", "country_sector-year", "annual", "low", "low", "low", "high", "diagnostic", "Node-level validation error for production reproduction.", "Can be unstable for very small observed output.", "medium"),
+    ]
+    return rows
+
+
+def semantic_row(
+    canonical_variable: str,
+    candidate_columns: str,
+    semantic_category: str,
+    economic_meaning: str,
+    preferred_source: str,
+    fallback_sources: str,
+    unit_of_observation: str,
+    time_grain: str,
+    usable_for_phase_space: str,
+    usable_for_trajectory: str,
+    usable_for_vector_field: str,
+    usable_for_latex_reference: str,
+    suggested_axis_role: str,
+    green_transition_interpretation: str,
+    caveats: str,
+    priority: str,
+) -> dict[str, str]:
+    """Create one semantic variable-map row."""
+    return {
+        "canonical_variable": canonical_variable,
+        "candidate_columns": candidate_columns,
+        "semantic_category": semantic_category,
+        "economic_meaning": economic_meaning,
+        "preferred_source": preferred_source,
+        "fallback_sources": fallback_sources,
+        "unit_of_observation": unit_of_observation,
+        "time_grain": time_grain,
+        "usable_for_phase_space": usable_for_phase_space,
+        "usable_for_trajectory": usable_for_trajectory,
+        "usable_for_vector_field": usable_for_vector_field,
+        "usable_for_latex_reference": usable_for_latex_reference,
+        "suggested_axis_role": suggested_axis_role,
+        "green_transition_interpretation": green_transition_interpretation,
+        "caveats": caveats,
+        "priority": priority,
+    }
+
+
 def build_visual_use_map_rows() -> list[dict[str, str]]:
     """Define the visual family map used by the catalog."""
     rows = [
         visual_row(
             "Phase-space trajectories: Global trajectory",
             "How does the global production system move through greenness, capability, and network exposure over time?",
-            "data/abm_v3/inputs/abm_v3_historical_panel_1995_2016_transpose_row_fd_without_inventory.parquet joined to data/atlas/processed/atlas_eora26_sector_capabilities_1995_2016.parquet when needed",
+            "data/abm_v3/phase_space/abm_v3_phase_space_state_panel_1995_2016.parquet",
             "Year; country_sector; X_observed; EI; green_capability_export_share; local_green_ness/network_green_ness if available",
             "emissions_observed; centrality; brown_centrality",
             "global aggregate by year",
@@ -746,7 +873,7 @@ def build_visual_use_map_rows() -> list[dict[str, str]]:
         visual_row(
             "Phase-space trajectories: Sector trajectories",
             "Which sectors move toward higher greenness/capability and which remain locked in?",
-            "current ABM v3 historical panel with Sector and Year columns",
+            "data/abm_v3/phase_space/abm_v3_phase_space_state_panel_1995_2016.parquet",
             "Year; Sector; X_observed; EI; green/network variables",
             "green_capability; emissions_observed",
             "sector-year",
@@ -761,7 +888,7 @@ def build_visual_use_map_rows() -> list[dict[str, str]]:
         visual_row(
             "Phase-space trajectories: Country-sector node trajectories: top 25 by output",
             "Which high-output country-sector nodes define the observed state-space movement?",
-            "current ABM v3 historical panel",
+            "data/abm_v3/phase_space/abm_v3_phase_space_state_panel_1995_2016.parquet",
             "Year; country_sector; X_observed; EI; green/network/capability variables",
             "Country; Sector; emissions_observed",
             "country_sector-year",
@@ -776,7 +903,7 @@ def build_visual_use_map_rows() -> list[dict[str, str]]:
         visual_row(
             "Phase-space trajectories: Country-sector node trajectories: top 25 by emissions",
             "Which high-emission nodes drive carbon-relevant movement?",
-            "current ABM v3 historical panel",
+            "data/abm_v3/phase_space/abm_v3_phase_space_state_panel_1995_2016.parquet",
             "Year; country_sector; emissions_observed or X_observed and EI; green/network/capability variables",
             "Sector; Country",
             "country_sector-year",
@@ -791,7 +918,7 @@ def build_visual_use_map_rows() -> list[dict[str, str]]:
         visual_row(
             "3D phase-space cubes: Green Transition Readiness Cube",
             "Where are nodes with green capability, improving local greenness, and supportive network exposure?",
-            "current ABM v3 historical panel plus Atlas processed capabilities",
+            "data/abm_v3/phase_space/abm_v3_phase_space_state_panel_1995_2016.parquet",
             "green_capability; local_green_ness; network_green_ness",
             "X_observed; EI; emissions_observed",
             "country_sector-year",
@@ -806,7 +933,7 @@ def build_visual_use_map_rows() -> list[dict[str, str]]:
         visual_row(
             "3D phase-space cubes: Brown Lock-in Cube",
             "Which nodes combine carbon-network lock-in with weak greenness or capability?",
-            "ABM v3 panel with centrality/brown-centrality diagnostics where available",
+            "data/abm_v3/phase_space/abm_v3_phase_space_state_panel_1995_2016.parquet",
             "brown_centrality; local_green_ness; green_capability",
             "emissions_observed; EI; X_observed",
             "country_sector-year",
@@ -821,7 +948,7 @@ def build_visual_use_map_rows() -> list[dict[str, str]]:
         visual_row(
             "3D phase-space cubes: Productive Ecosystem Transition Cube",
             "Where do green capability and ecosystem proximity suggest transition readiness?",
-            "Atlas processed capabilities joined to ABM v3 historical panel",
+            "data/abm_v3/phase_space/abm_v3_phase_space_state_panel_1995_2016.parquet",
             "green_capability; ecosystem_proximity/capability_readiness; local_green_ness",
             "X_observed; Sector; Country",
             "country_sector-year",
@@ -836,7 +963,7 @@ def build_visual_use_map_rows() -> list[dict[str, str]]:
         visual_row(
             "3D phase-space cubes: Production-Safe Greening Cube",
             "Can greening be read alongside production scale rather than apart from it?",
-            "current ABM v3 historical panel",
+            "data/abm_v3/phase_space/abm_v3_phase_space_state_panel_1995_2016.parquet",
             "X_observed or log_output; local_green_ness; network_green_ness",
             "green_capability; EI; emissions_observed",
             "country_sector-year",
@@ -866,7 +993,7 @@ def build_visual_use_map_rows() -> list[dict[str, str]]:
         visual_row(
             "Vector-field plots: average movement in binned state space",
             "What is the typical direction of movement by region of state space?",
-            "consolidated phase-space state panel derived from authoritative ABM v3 sources",
+            "data/abm_v3/phase_space/abm_v3_phase_space_state_panel_1995_2016.parquet",
             "state variables at t and t+1; Year; country_sector",
             "X_observed weights; emissions weights",
             "country_sector-year movement",
@@ -881,7 +1008,7 @@ def build_visual_use_map_rows() -> list[dict[str, str]]:
         visual_row(
             "Vector-field plots: local green-ness movement conditional on capability and network exposure",
             "Does local greenness improve where capability and network exposure are high?",
-            "consolidated phase-space state panel",
+            "data/abm_v3/phase_space/abm_v3_phase_space_state_panel_1995_2016.parquet",
             "green_capability; network_green_ness; local_green_ness_delta",
             "EI_delta; output weights",
             "country_sector-year movement",
@@ -1052,9 +1179,12 @@ def visual_row(
 
 def build_markdown_catalog(inventory: pd.DataFrame, variables: pd.DataFrame, visual_map: pd.DataFrame) -> str:
     """Build the readable Markdown catalog."""
-    authoritative = inventory.loc[inventory["status"].eq("authoritative_current"), "relative_path"].tolist()
-    diagnostics = inventory.loc[inventory["status"].isin(["current_diagnostic", "current_scenario_output"]), "relative_path"].tolist()
+    state_sources = inventory.loc[inventory["status"].eq("authoritative_state_source"), "relative_path"].tolist()
+    model_outputs = inventory.loc[inventory["status"].eq("authoritative_model_output"), "relative_path"].tolist()
+    diagnostics = inventory.loc[inventory["status"].eq("current_diagnostic"), "relative_path"].tolist()
+    scenario_outputs = inventory.loc[inventory["status"].eq("current_scenario_output"), "relative_path"].tolist()
     legacy = inventory.loc[inventory["status"].eq("legacy"), "relative_path"].tolist()
+    source_data = inventory.loc[inventory["status"].isin(["raw_source", "processed_source"]), "relative_path"].tolist()
     phase_sources = inventory.loc[inventory["phase_space_use"].astype(str).ne(""), ["relative_path", "phase_space_use"]]
 
     variable_sections = build_variable_family_sections(variables)
@@ -1080,19 +1210,39 @@ def build_markdown_catalog(inventory: pd.DataFrame, variables: pd.DataFrame, vis
             "- Legacy ABM outputs under `data/abm/` remain useful for comparison, but should not be treated as ABM v3 canonical sources without validation.",
             "- Plot outputs under `outputs/plots/` are visual outputs, not data sources.",
             "",
-            "## Authoritative Current ABM v3 Sources",
-            format_path_list(authoritative, limit=50, empty_text="No authoritative current source was detected by the current path and schema heuristics."),
+            "## Authoritative State Sources",
+            format_path_list(state_sources, limit=20, empty_text="No authoritative state source was detected by the current path and schema heuristics."),
             "",
-            "The full authoritative-current list is available in `data_inventory.csv`; this Markdown section is intentionally bounded for readability.",
+            "These files can define historical `country_sector` x `Year` state variables after schema validation. The main baseline source is the corrected ABM v3 historical input panel.",
             "",
-            "Likely current sources are marked authoritative only when their inspected path supports the current ABM v3 role, especially the corrected `transpose_row_fd_without_inventory` input panel and behavioural Leontief outputs.",
+            "## Current Model Outputs",
+            format_path_list(model_outputs, limit=30, empty_text="No authoritative model-output files were detected."),
             "",
-            "## Important Legacy or Diagnostic Sources",
-            "Current diagnostic and scenario-analysis sources:",
-            format_path_list(diagnostics, limit=40, empty_text="No diagnostic or scenario-analysis sources were detected."),
+            "Behavioural Leontief node-comparison and propagation files are current validated model outputs or diagnostics. They should not be treated as the primary historical state panel.",
             "",
-            "Legacy sources:",
+            "## Current Diagnostics",
+            format_path_list(diagnostics, limit=40, empty_text="No current diagnostic sources were detected."),
+            "",
+            "## Current Scenario Outputs",
+            format_path_list(scenario_outputs, limit=40, empty_text="No current scenario outputs were detected."),
+            "",
+            "Scenario outputs support perturbation overlays and response comparisons. They are not baseline historical phase-space trajectories.",
+            "",
+            "## Legacy Sources",
             format_path_list(legacy, limit=30, empty_text="No legacy sources were detected."),
+            "",
+            "Legacy files under `data/abm/` are comparison material only unless a later validation step explicitly promotes them.",
+            "",
+            "## Raw and Processed Source Data",
+            format_path_list(source_data, limit=40, empty_text="No raw or processed source data were detected in this inventory run."),
+            "",
+            "Raw and processed source files feed state construction only after explicit inspection and validation. The full raw inventory remains available in `data_inventory.csv`.",
+            "",
+            "## Semantic Variable Map",
+            "The curated semantic variable map is written to `abm_v3_semantic_variable_map.csv`. It is intentionally compact and maps economically meaningful variables or variable families to preferred sources, interpretation notes, phase-space roles, and LaTeX-ready caveats.",
+            "",
+            "## Phase-Space State Panel Readiness",
+            "The canonical phase-space state panel should be built with `python -m src.abm_v3.runner phase-space-state-panel --start-year 1995 --end-year 2016`. Once built, phase-space visuals should use `data/abm_v3/phase_space/abm_v3_phase_space_state_panel_1995_2016.parquet` rather than broad diagnostic inventories.",
             "",
             "## Variable Families and Economic Meaning",
             variable_sections,

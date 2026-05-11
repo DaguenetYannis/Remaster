@@ -9,6 +9,7 @@ import pytest
 from src.abm_v3.data_inventory import (
     build_data_inventory,
     classify_file_group,
+    classify_status,
     classify_variable_semantics,
     inspect_file,
 )
@@ -27,10 +28,12 @@ def write_toy_inventory_files(root: Path) -> None:
     input_dir = root / "abm_v3" / "inputs"
     ei_dir = root / "abm_v3" / "ei_transition" / "inputs"
     scenario_dir = root / "abm_v3" / "leontief" / "behavioural" / "scenarios" / "analysis_report"
+    behavioural_diagnostics_dir = root / "abm_v3" / "leontief" / "behavioural" / "diagnostics"
     legacy_dir = root / "abm"
     input_dir.mkdir(parents=True, exist_ok=True)
     ei_dir.mkdir(parents=True, exist_ok=True)
     scenario_dir.mkdir(parents=True, exist_ok=True)
+    behavioural_diagnostics_dir.mkdir(parents=True, exist_ok=True)
     legacy_dir.mkdir(parents=True, exist_ok=True)
 
     pd.DataFrame(
@@ -60,6 +63,16 @@ def write_toy_inventory_files(root: Path) -> None:
             "delta_X": [4.0],
         }
     ).to_csv(scenario_dir / "scenario_effects.csv", index=False)
+
+    pd.DataFrame(
+        {
+            "country_sector": ["AAA | Agriculture"],
+            "Year": [1995],
+            "X_observed": [100.0],
+            "X_realized": [99.0],
+            "absolute_percentage_error": [0.01],
+        }
+    ).to_parquet(behavioural_diagnostics_dir / "behavioural_node_comparison_1995.parquet")
 
     pd.DataFrame({"country_sector": ["AAA | Agriculture"], "Year": [1995], "output": [100.0]}).to_parquet(
         legacy_dir / "simulation_output.parquet"
@@ -115,6 +128,34 @@ def test_file_group_classifies_current_and_legacy_sources() -> None:
     assert classify_file_group(Path("abm/simulation_output.parquet")) == "legacy_abm"
 
 
+def test_refined_status_classification_separates_state_model_scenario_and_legacy() -> None:
+    assert (
+        classify_status(
+            Path("abm_v3/inputs/abm_v3_historical_panel_1995_2016_transpose_row_fd_without_inventory.parquet"),
+            "abm_v3_input_panel",
+            "model_input",
+        )
+        == "authoritative_state_source"
+    )
+    assert (
+        classify_status(
+            Path("abm_v3/leontief/behavioural/diagnostics/behavioural_node_comparison_1995.parquet"),
+            "abm_v3_leontief_behavioural",
+            "model_output",
+        )
+        == "authoritative_model_output"
+    )
+    assert (
+        classify_status(
+            Path("abm_v3/leontief/behavioural/scenarios/analysis_report/scenario_effects.csv"),
+            "abm_v3_scenario_analysis",
+            "scenario",
+        )
+        == "current_scenario_output"
+    )
+    assert classify_status(Path("abm/simulation_output.parquet"), "legacy_abm", "model_output") == "legacy"
+
+
 def test_markdown_catalog_is_written() -> None:
     root = toy_root()
     write_toy_inventory_files(root)
@@ -123,7 +164,22 @@ def test_markdown_catalog_is_written() -> None:
     markdown = written["catalog"].read_text(encoding="utf-8")
 
     assert "# ABM v3 Data Catalog and Visual Use Map" in markdown
-    assert "Authoritative Current ABM v3 Sources" in markdown
+    assert "Authoritative State Sources" in markdown
+    assert "Current Model Outputs" in markdown
+
+
+def test_semantic_variable_map_is_written_with_core_variables() -> None:
+    root = toy_root()
+    write_toy_inventory_files(root)
+
+    written = build_data_inventory(root=root, output_dir=root / "abm_v3" / "data_inventory")
+    semantic_map = pd.read_csv(written["semantic_variable_map"])
+    canonical_variables = set(semantic_map["canonical_variable"])
+
+    assert {"country_sector", "X_observed", "EI", "g_local"}.issubset(canonical_variables)
+    assert {"green_capability_export_share", "network_green_exposure", "brown_centrality", "rEI"}.issubset(
+        canonical_variables
+    )
 
 
 def test_visual_use_map_includes_all_five_3d_cubes() -> None:
@@ -149,3 +205,9 @@ def test_data_inventory_cli_command_is_registered() -> None:
     assert args.command == "data-inventory"
     assert args.focus == "abm_v3"
     assert args.sample_rows == 3
+
+    phase_args = parser.parse_args(["phase-space-state-panel", "--start-year", "1995", "--end-year", "2016"])
+
+    assert phase_args.command == "phase-space-state-panel"
+    assert phase_args.start_year == 1995
+    assert phase_args.end_year == 2016
