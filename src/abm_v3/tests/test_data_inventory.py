@@ -197,6 +197,39 @@ def test_visual_use_map_includes_all_five_3d_cubes() -> None:
     assert "3D phase-space cubes: Scenario Perturbation Cube" in cube_names
 
 
+def test_phase_space_and_vector_field_visuals_use_state_panel_and_axis_variants() -> None:
+    root = toy_root()
+    write_toy_inventory_files(root)
+
+    written = build_data_inventory(root=root, output_dir=root / "abm_v3" / "data_inventory")
+    visual_map = pd.read_csv(written["visual_use_map"])
+    phase_panel = "data/abm_v3/phase_space/abm_v3_phase_space_state_panel_1995_2016.parquet"
+    phase_or_vector = visual_map.loc[
+        visual_map["visual_family"].str.contains("phase-space|Vector-field", case=False, na=False)
+    ]
+
+    assert not phase_or_vector.empty
+    assert set(phase_or_vector["recommended_data_source"]) == {phase_panel}
+    assert visual_map["visual_family"].str.contains("g_in_network variant", na=False).any()
+    assert visual_map["visual_family"].str.contains("g_out_network variant", na=False).any()
+
+
+def test_semantic_variable_map_marks_available_and_target_network_variables() -> None:
+    root = toy_root()
+    write_toy_inventory_files(root)
+
+    written = build_data_inventory(root=root, output_dir=root / "abm_v3" / "data_inventory")
+    semantic_map = pd.read_csv(written["semantic_variable_map"]).set_index("canonical_variable")
+
+    assert semantic_map.loc["network_green_exposure", "preferred_source"] == "missing_or_not_yet_constructed"
+    assert "canonical target concept" in semantic_map.loc["network_green_exposure", "economic_meaning"].lower()
+    assert semantic_map.loc["g_in_network", "preferred_source"].endswith("abm_v3_phase_space_state_panel_1995_2016.parquet")
+    assert semantic_map.loc["g_out_network", "preferred_source"].endswith("abm_v3_phase_space_state_panel_1995_2016.parquet")
+    assert semantic_map.loc["brown_centrality", "preferred_source"] == "missing_or_not_yet_constructed"
+    assert semantic_map.loc["capability_ecosystem_exposure", "preferred_source"] == "missing_or_not_yet_constructed"
+    assert "may derive a fallback" in semantic_map.loc["g_local", "caveats"]
+
+
 def test_data_inventory_cli_command_is_registered() -> None:
     parser = build_parser()
 

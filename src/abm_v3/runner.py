@@ -33,6 +33,7 @@ from src.abm_v3.leontief.validation import LeontiefPropagationValidator
 from src.abm_v3.leontief.viability import LeontiefViabilityAnalyzer
 from src.abm_v3.model import ABMV3Model
 from src.abm_v3.paths import ABMV3Paths
+from src.abm_v3.phase_space.plots import PhaseSpacePlotBuilder
 from src.abm_v3.phase_space.state_panel import ABMV3PhaseSpaceStatePanelBuilder
 from src.abm_v3.real_data_smoke_test import RealDataSmokeTester
 from src.abm_v3.scenarios.registry import list_scenarios
@@ -271,6 +272,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     phase_space_state_panel.add_argument("--include-scenario-overlays", action="store_true", default=False)
     phase_space_state_panel.add_argument("--strict", action="store_true", default=False)
+
+    phase_space_plots = subparsers.add_parser("phase-space-plots")
+    phase_space_plots.add_argument("--start-year", type=int, default=1995)
+    phase_space_plots.add_argument("--end-year", type=int, default=2016)
+    phase_space_plots.add_argument(
+        "--state-panel",
+        default="data/abm_v3/phase_space/abm_v3_phase_space_state_panel_1995_2016.parquet",
+    )
+    phase_space_plots.add_argument("--output-dir", default="outputs/plots/abm_v3/phase_space")
+    phase_space_plots.add_argument(
+        "--audience",
+        choices=["portfolio", "research", "diagnostic", "both"],
+        default="both",
+    )
+    phase_space_plots.add_argument("--color-mode", choices=["default", "colorblind"], default="default")
+    phase_space_plots.add_argument("--plot-3d", action=argparse.BooleanOptionalAction, default=True)
+    phase_space_plots.add_argument("--plot-2d", action=argparse.BooleanOptionalAction, default=True)
+    phase_space_plots.add_argument("--plot-vector-fields", action=argparse.BooleanOptionalAction, default=True)
+    phase_space_plots.add_argument("--top-n", type=int, default=25)
+    phase_space_plots.add_argument("--no-global", action="store_true")
+    phase_space_plots.add_argument("--no-sector", action="store_true")
+    phase_space_plots.add_argument("--no-node", action="store_true")
+    phase_space_plots.add_argument("--strict", action="store_true", default=False)
     return parser
 
 
@@ -1022,6 +1046,23 @@ def main() -> None:
         ).build(start_year=args.start_year, end_year=args.end_year)
         for name, path in written_paths.items():
             print(f"[ABM v3 Phase Space] {name}: {path}")
+    elif args.command == "phase-space-plots":
+        written_paths = PhaseSpacePlotBuilder(
+            state_panel=args.state_panel,
+            output_dir=args.output_dir,
+            audience=args.audience,
+            color_mode=args.color_mode,
+            plot_3d=args.plot_3d,
+            plot_2d=args.plot_2d,
+            plot_vector_fields=args.plot_vector_fields,
+            top_n=args.top_n,
+            include_global=not args.no_global,
+            include_sector=not args.no_sector,
+            include_node=not args.no_node,
+            strict=args.strict,
+        ).build(start_year=args.start_year, end_year=args.end_year)
+        for name, path in written_paths.items():
+            print(f"[ABM v3 Phase Space Plots] {name}: {path}")
 
 
 if __name__ == "__main__":

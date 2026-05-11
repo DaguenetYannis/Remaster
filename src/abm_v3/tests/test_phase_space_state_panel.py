@@ -103,6 +103,39 @@ def test_phase_space_state_panel_diagnostics_report_missing_derived_and_duplicat
     assert "1 / (1 + EI)" in str(g_local["formula_or_transformation"])
 
 
+def test_column_dictionary_does_not_assign_g_local_formula_when_observed() -> None:
+    root = toy_workspace()
+    base_panel = root / "inputs" / "base_with_g_local.parquet"
+    output_dir = root / "phase_space"
+    base_panel.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        {
+            "country_sector": ["AAA | Agriculture", "AAA | Agriculture"],
+            "Year": [1995, 1996],
+            "X_observed": [100.0, 120.0],
+            "EI": [0.5, 0.4],
+            "g_local": [0.66, 0.71],
+            "g_in_network": [0.4, 0.45],
+            "g_out_network": [0.5, 0.55],
+        }
+    ).to_parquet(base_panel, index=False)
+
+    written = ABMV3PhaseSpaceStatePanelBuilder(base_panel=base_panel, output_dir=output_dir).build(
+        start_year=1995,
+        end_year=1996,
+    )
+    columns = pd.read_csv(written["columns"])
+    g_local = columns.loc[columns["column"].eq("g_local")].iloc[0]
+    g_in_network = columns.loc[columns["column"].eq("g_in_network")].iloc[0]
+    g_out_network = columns.loc[columns["column"].eq("g_out_network")].iloc[0]
+
+    assert not bool(g_local["derived"])
+    assert pd.isna(g_local["formula_or_transformation"]) or g_local["formula_or_transformation"] == ""
+    assert "Available local green-ness proxy" in g_local["economic_meaning"]
+    assert g_in_network["recommended_visual_role"] == "z_axis_available_variant"
+    assert g_out_network["recommended_visual_role"] == "z_axis_available_variant"
+
+
 def test_phase_space_state_panel_strict_mode_fails_on_missing_required_keys() -> None:
     root = toy_workspace()
     base_panel = root / "inputs" / "bad.parquet"
