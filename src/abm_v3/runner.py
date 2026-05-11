@@ -27,6 +27,7 @@ from src.abm_v3.leontief.orientation import LeontiefOrientationAuditor
 from src.abm_v3.leontief.outputs import LeontiefOutputWriter
 from src.abm_v3.leontief.propagation import LeontiefPropagationEngine
 from src.abm_v3.leontief.scenarios.analysis_report import BehaviouralScenarioAnalysisReportBuilder
+from src.abm_v3.leontief.scenarios.phase_space_plots import ScenarioPhaseSpacePlotBuilder
 from src.abm_v3.leontief.scenarios.registry import get_behavioural_scenario, list_behavioural_scenarios
 from src.abm_v3.leontief.scenarios.runner import BehaviouralLeontiefScenarioRunner
 from src.abm_v3.leontief.validation import LeontiefPropagationValidator
@@ -302,6 +303,20 @@ def build_parser() -> argparse.ArgumentParser:
     phase_space_plots.add_argument("--no-sector", action="store_true")
     phase_space_plots.add_argument("--no-node", action="store_true")
     phase_space_plots.add_argument("--strict", action="store_true", default=False)
+
+    scenario_phase_space_plots = subparsers.add_parser("scenario-phase-space-plots")
+    scenario_phase_space_plots.add_argument("--start-year", type=int, default=1995)
+    scenario_phase_space_plots.add_argument("--end-year", type=int, default=2016)
+    scenario_phase_space_plots.add_argument("--scenario-names", nargs="+", default=None)
+    scenario_phase_space_plots.add_argument("--reference-scenario", default="historical_or_baseline")
+    scenario_phase_space_plots.add_argument("--title-mode", choices=["interpretive", "technical"], default="interpretive")
+    scenario_phase_space_plots.add_argument("--top-sector-n", type=int, default=8)
+    scenario_phase_space_plots.add_argument("--top-node-n", type=int, default=10)
+    scenario_phase_space_plots.add_argument("--research-top-node-n", type=int, default=25)
+    scenario_phase_space_plots.add_argument("--mark-years", nargs="+", type=int, default=[1995, 2000, 2008, 2016])
+    scenario_phase_space_plots.add_argument("--write-diagnostics", action=argparse.BooleanOptionalAction, default=True)
+    scenario_phase_space_plots.add_argument("--no-plots", action="store_true")
+    scenario_phase_space_plots.add_argument("--color-mode", choices=["default", "colorblind"], default="default")
     return parser
 
 
@@ -1077,6 +1092,22 @@ def main() -> None:
         ).build(start_year=args.start_year, end_year=args.end_year)
         for name, path in written_paths.items():
             print(f"[ABM v3 Phase Space Plots] {name}: {path}")
+    elif args.command == "scenario-phase-space-plots":
+        written_paths = ScenarioPhaseSpacePlotBuilder(
+            paths=ABMV3Paths(),
+            scenario_names=args.scenario_names,
+            reference_scenario=args.reference_scenario,
+            title_mode=args.title_mode,
+            top_sector_n=args.top_sector_n,
+            top_node_n=args.top_node_n,
+            research_top_node_n=args.research_top_node_n,
+            mark_years=tuple(args.mark_years),
+            write_diagnostics=args.write_diagnostics,
+            make_plots=not args.no_plots,
+            color_mode=args.color_mode,
+        ).build(start_year=args.start_year, end_year=args.end_year)
+        for name, path in written_paths.items():
+            print(f"[ABM v3 Scenario Phase Space] {name}: {path}")
 
 
 if __name__ == "__main__":

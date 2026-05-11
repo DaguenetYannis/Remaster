@@ -248,6 +248,41 @@ class ABMV3Paths:
         return self.behavioural_leontief_scenario_analysis_markdown_dir / f"scenario_analysis_markdown_{start_year}_{end_year}.md"
 
     @property
+    def scenario_phase_space_dir(self) -> Path:
+        return self.abm_v3_output_root / "scenario_phase_space"
+
+    @property
+    def scenario_phase_space_plot_dir(self) -> Path:
+        return self.project_root / "outputs" / "plots" / "abm_v3" / "scenario_phase_space"
+
+    def scenario_phase_space_manifest_path(self, start_year: int, end_year: int) -> Path:
+        return self.scenario_phase_space_dir / f"scenario_phase_space_manifest_{start_year}_{end_year}.csv"
+
+    def scenario_phase_space_endpoint_summary_path(self, start_year: int, end_year: int) -> Path:
+        return self.scenario_phase_space_dir / f"scenario_phase_space_endpoint_summary_{start_year}_{end_year}.csv"
+
+    def scenario_phase_space_delta_summary_path(self, start_year: int, end_year: int) -> Path:
+        return self.scenario_phase_space_dir / f"scenario_phase_space_delta_summary_{start_year}_{end_year}.csv"
+
+    def scenario_phase_space_time_series_path(self, start_year: int, end_year: int) -> Path:
+        return self.scenario_phase_space_dir / f"scenario_phase_space_time_series_{start_year}_{end_year}.csv"
+
+    def scenario_phase_space_sector_summary_path(self, start_year: int, end_year: int) -> Path:
+        return self.scenario_phase_space_dir / f"scenario_phase_space_sector_summary_{start_year}_{end_year}.csv"
+
+    def scenario_phase_space_node_summary_path(self, start_year: int, end_year: int) -> Path:
+        return self.scenario_phase_space_dir / f"scenario_phase_space_node_summary_{start_year}_{end_year}.csv"
+
+    def scenario_phase_space_diagnostics_path(self, start_year: int, end_year: int) -> Path:
+        return self.scenario_phase_space_dir / f"scenario_phase_space_diagnostics_{start_year}_{end_year}.csv"
+
+    def scenario_phase_space_figure_recommendations_path(self, start_year: int, end_year: int) -> Path:
+        return self.scenario_phase_space_dir / f"scenario_phase_space_figure_recommendations_{start_year}_{end_year}.csv"
+
+    def scenario_phase_space_readme_path(self, start_year: int, end_year: int) -> Path:
+        return self.scenario_phase_space_dir / f"scenario_phase_space_readme_{start_year}_{end_year}.md"
+
+    @property
     def ei_transition_dir(self) -> Path:
         return self.abm_v3_output_root / "ei_transition"
 
