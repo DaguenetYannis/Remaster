@@ -13,6 +13,13 @@ STATE_REQUIRED_COLUMNS: tuple[str, ...] = (
     "Year",
     "X_observed",
     "EI",
+)
+
+STATE_DERIVED_COLUMNS: tuple[str, ...] = (
+    "log_x_observed",
+    "log_EI",
+    "g_local_v4",
+    "network_green_exposure",
     "g_local",
     "brown_centrality",
     "general_capability",
@@ -33,9 +40,11 @@ STATE_OPTIONAL_COLUMNS: tuple[str, ...] = (
     "g_out_network",
     "centrality",
     "pagerank",
-    "log_x_observed",
-    "log_EI",
-    "g_local_v4",
+    "active_good_count",
+    "capability_mean_pci",
+    "capability_export_weighted_pci",
+    "green_capability_export_share",
+    "green_capability_share",
 )
 
 ECOSYSTEM_MAPPING_REQUIRED_COLUMNS: tuple[str, ...] = (

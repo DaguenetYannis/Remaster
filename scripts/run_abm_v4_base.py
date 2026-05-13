@@ -6,6 +6,7 @@ from src.abm_v4.config import ABMV4Config
 from src.abm_v4.diagnostics import build_path_audit_rows, format_path_audit_table
 from src.abm_v4.paths import ABMV4Paths
 from src.abm_v4.simulation import inspect_base_model_readiness
+from src.abm_v4.state import build_state_panel
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,6 +25,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Create data/abm_v4 output directories for a future run.",
     )
+    parser.add_argument(
+        "--build-state",
+        action="store_true",
+        help="Build the ABM v4 state panel. Requires --create-output-dirs to write files.",
+    )
     return parser
 
 
@@ -36,6 +42,21 @@ def main() -> None:
     if args.dry_run:
         rows = build_path_audit_rows(paths, config.start_year, config.end_year)
         print(format_path_audit_table(rows))
+        return
+
+    if args.build_state:
+        if not args.create_output_dirs:
+            raise SystemExit("--build-state requires --create-output-dirs to write outputs.")
+        result = build_state_panel(
+            paths=paths,
+            start_year=config.start_year,
+            end_year=config.end_year,
+            write_outputs=True,
+            epsilon=config.epsilon,
+        )
+        print(f"Selected state source: {result.selected_source}")
+        print(f"State panel rows: {result.state_panel.height}")
+        print(f"State panel path: {result.output_path}")
         return
 
     if args.create_output_dirs:
