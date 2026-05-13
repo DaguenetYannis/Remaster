@@ -1,248 +1,133 @@
 # AGENTS.md
 
-## 🧭 Project Purpose
+## Project Purpose
 
 This repository implements a Python-only research pipeline to study:
-- global production networks  
-- input-output structures (Eora26)  
-- emergence of greener configurations in trade networks  
+- global production networks
+- Eora26 input-output structures
+- emissions intensity, network green-ness, and transition dynamics
+- agent-based and Leontief-style scenario experiments
 
-The objective is to:
-- build a transparent pipeline from raw Eora data to analytical outputs  
-- define and measure “green-ness” as a system-level, network-based property  
-- enable reproducible and inspectable economic analysis  
+The objective is to keep the full path from raw Eora and Atlas data to analytical outputs transparent, reproducible, and inspectable.
 
----
+## Core Constraints
 
-## ⚙️ Core Constraints
+- Python only.
+- Prefer Polars over pandas for new tabular transformation code unless the active module already depends on pandas.
+- Use `pathlib.Path` for file paths.
+- Use type hints and docstrings consistently.
+- Prefer explicit, readable, inspectable code.
+- Avoid hidden logic and implicit behavior.
+- Surface uncertainty instead of guessing.
 
-- Python only (no external IO analysis tools)  
-- Prefer Polars over pandas unless strictly necessary  
-- Use pathlib for all file paths  
-- Use type hints and docstrings consistently  
-- Prefer explicit, readable, and inspectable code  
-- Avoid hidden logic and implicit behavior  
-- Always surface uncertainty instead of guessing  
+## Current Repository Structure
 
----
+- `src/data_manager/` -> Eora download, extraction, raw inspection, parquet conversion.
+- `src/metric_builder/` -> EI, ET, green-ness, centrality, and efficiency metrics.
+- `src/atlas_data/` -> Atlas download, cleaning, concordance, and Eora-sector aggregation.
+- `src/modelling/` -> Eora-Atlas merges, dynamic panels, transition modelling, estimates, clusters.
+- `src/plotting/` -> transition, trajectory, phase-space, and scenario plots.
+- `src/abm_v1/` -> earlier ABM preparation, diagnostics, estimation, and scenario scripts.
+- `src/abm_v2/` -> ABM v2 model, runner, metrics, plots, and audit helpers.
+- `src/abm_v3/` -> current structured ABM v3, Leontief, diagnostics, validation, and scenario workflow.
+- `notebooks/` -> marimo notebooks only.
+- `tests/` and `src/abm_v3/tests/` -> test coverage.
+- `data/raw/` -> raw Eora files and labels.
+- `data/parquet/` -> labelled Eora matrices by year.
+- `data/metrics/` -> yearly derived metric outputs.
+- `data/atlas/` -> Atlas raw, concordance, and processed data.
+- `data/final/` -> merged panels, transition dynamics, estimates.
+- `data/abm/` -> earlier ABM outputs.
+- `data/abm_v3/` -> current ABM v3 and Leontief outputs.
+- `outputs/` -> generated figures, tables, and audit outputs.
+- `logs/` -> local logs.
+- `tmp/` -> disposable test and development outputs.
 
-## 📁 Repository Structure
+Reusable logic belongs in `src/`. Notebooks should orchestrate computation, display outputs, and call reusable functions from `src/`.
 
-- `src/io/` → data loading, schema definition, validation, raw inspection  
-- `src/transforms/` → canonicalization and matrix construction  
-- `src/network/` → network construction and analysis  
-- `notebooks/` → marimo notebooks only  
-- `scripts/` → pipeline entry points  
-- `data/raw/` → raw Eora data (read-only)  
-- `data/interim/` → cleaned canonical tables  
-- `data/processed/` → analysis-ready datasets  
-- `outputs/` → figures, tables, logs  
-- `tmp/` → disposable data  
+## Path Conventions
 
-Reusable logic must always live in `src/`.
+- Shared project-level paths live in `src.paths`.
+- ABM v3 path construction lives in `src.abm_v3.paths.ABMV3Paths`.
+- Use relative project paths such as `data/parquet`, `data/metrics`, and `outputs/plots` in scripts and documentation.
+- Do not hard-code local absolute paths.
+- Do not assume that generated data exists. Check paths, log missing inputs, and continue where possible.
 
----
+## Data Principles
 
-## 📊 Data Principles (Eora)
+- Raw Eora data must be inspected before transformation.
+- Raw datasets must not be assumed to match any canonical structure without checks.
+- Transformations must be explicit and traceable.
+- If a dataset structure is unclear, log a warning and continue without guessing silently.
+- Preserve interpretability of country-sector relationships.
+- The system is defined at the level of interconnected country-sector nodes.
 
-- Raw Eora data must always be inspected before transformation  
-- Canonical schemas are defined in `eora_schema.py`  
-- Raw datasets must never be assumed to match canonical schemas  
-- Transformations must be explicit and traceable  
-- If the structure of a dataset is unclear, **log a warning and continue without guessing silently**  
-- All transformations must preserve interpretability of country-sector relationships  
-- The system is defined at the level of interconnected country-sector nodes  
+## Coding Principles
 
----
+- Separate IO logic, transformation logic, modelling logic, and plotting logic.
+- Prefer clarity over abstraction.
+- Avoid overengineering.
+- Avoid hidden behavior and implicit transformations.
+- Write modular, reusable code.
+- Avoid duplication across files.
+- Keep helper functions focused and single-purpose.
+- Larger orchestration functions are acceptable when they reflect the full research workflow.
+- Reusable mechanisms should be extracted into clearly named helpers.
 
-## 🧠 Coding Principles
+## Function and Class Design
 
-- Separate concerns clearly:
-  - IO logic  
-  - transformation logic  
-  - analytical logic  
+- OOP is acceptable when it improves clarity.
+- Classes should have a clear role and simple state.
+- Methods should have explicit inputs, explicit outputs, and clear side effects.
+- Avoid abstraction layers that obscure behavior.
 
-- Prefer clarity over abstraction  
-- Avoid overengineering  
-- Avoid hidden behavior and implicit transformations  
-- Write modular, reusable code  
-- Avoid duplication across files  
-
-### Function design
-- Small helper functions should be focused and single-purpose  
-- Larger orchestration functions are encouraged when they reflect the full human logic of a process  
-- Large functions should coordinate steps, not hide complex logic inline  
-- Reusable mechanisms must be extracted into clearly named helper functions  
-
----
-
-## 🏗️ Design Style (Functions vs OOP)
-
-- OOP is fully acceptable and encouraged when it improves clarity and structure  
-- Classes should remain simple, explicit, and easy to inspect  
-- Prefer designs where:
-  - each class has a clear role  
-  - each method has a clear purpose  
-- Do not introduce abstraction layers that obscure behavior  
-- Whether using functions or classes, the priority is always:
-  - readability  
-  - traceability  
-  - explicit logic  
-
----
-
-## 📓 Marimo Notebook Rules (MANDATORY)
+## Marimo Notebook Rules
 
 This project uses marimo, not Jupyter.
 
-- Notebooks must be reactive, not sequential  
-- No reliance on execution order  
-- No hidden state across cells  
-- No mutation of objects defined in other cells  
+- Notebooks must be reactive, not sequential scripts.
+- Do not rely on execution order.
+- Do not hide state across cells.
+- Do not mutate objects defined in other cells.
+- Keep reusable logic out of notebooks.
+- Call functions defined in `src/`.
+- Use notebooks to orchestrate computation, inspect results, and display outputs.
 
-Each cell must:
-- be self-contained OR explicitly dependent on inputs  
-- define all required variables or receive them explicitly  
+## Error Handling and Logging
 
-Notebooks must:
-- call functions defined in `src/`  
-- orchestrate computation  
-- display outputs and results  
+- Prefer warning-and-continue behavior for research pipelines.
+- If a step fails, log the issue clearly and continue processing remaining data where possible.
+- Logging should make visible what went in, what changed, and what came out.
+- Prefer inline console visibility over hidden log files.
+- Include visibility checks such as dataframe shapes, column changes, row counts, missingness, and output locations.
+- Silent failure is forbidden.
 
-Notebooks must NOT:
-- implement core logic  
-- contain long procedural pipelines  
-- duplicate transformation logic  
+## Research Coding Style
 
-Exploratory work is allowed, but reusable logic must always be moved to `src/`.
+- Prefer readable code over compact code.
+- Verbosity is acceptable when it improves understanding.
+- Prefer simple logic over clever logic.
+- Keep transformations inspectable.
+- Use specific variable names.
+- Clearly distinguish dataframes, matrices, paths, and domain objects.
+- Add short, literal comments for non-trivial logic.
 
-**Mental model:** notebooks are dependency graphs, not scripts  
+## What Codex Must Not Do
 
----
+- Do not assume the structure of Eora datasets without inspection.
+- Do not invent or approximate missing data structures.
+- Do not embed core logic inside notebooks.
+- Do not introduce unnecessary abstractions.
+- Do not introduce hidden dependencies between modules.
+- Do not write code that relies on implicit state or execution order.
+- Do not prioritize cleverness over clarity.
+- Do not delete files under `src/`, `data/`, or `outputs/` unless the user explicitly asks.
 
-## ⚠️ Error Handling and Logging
-
-- Never stop execution due to errors  
-- Always **log warnings and continue execution**  
-
-Error handling rules:
-- If a step fails:
-  - log the issue clearly  
-  - continue processing remaining data  
-
-- Logging must always make visible:
-  - what went in  
-  - what changed  
-  - what came out  
-
-- Prefer inline console output over log files  
-- Include visibility checks such as:
-  - dataframe shapes  
-  - column changes  
-  - dropped or created rows  
-  - output summaries  
-
-- Silent failure is strictly forbidden  
-
----
-
-## 🧬 Personal Coding Style
-
-The code in this repository follows a research-oriented style centered on readability and transparency.
-
-### General principles
-- Prefer readable code over compact code  
-- Verbosity is acceptable if it improves understanding  
-- Prefer simple logic over clever logic  
-- Code should be understandable without reconstructing hidden reasoning  
-
----
-
-### Transformations and intermediate steps
-- Transformations must remain inspectable  
-- Prefer sequential steps over nested logic  
-- Intermediate states are useful during development  
-- Once stable, intermediate variables may be reduced if visibility is preserved through logs  
-
----
-
-### Naming
-- Use highly specific variable names  
-- Clearly distinguish dataframes, matrices, and objects  
-- Apply this even in loops and local scopes  
-- Prefer clarity over brevity  
-
----
-
-### Validation
-- Validate data immediately after each step  
-- Always make visible how data changed  
-- Use simple, explicit checks:
-  - shapes  
-  - columns  
-  - transformations  
-
----
-
-### Comments
-- Add comments for any non-trivial logic  
-- Comments must be:
-  - short  
-  - precise  
-  - literal  
-
-- Good comments explain:
-  - what goes in  
-  - what is transformed  
-  - what comes out  
-
-- Avoid vague or high-level comments  
-
----
-
-### Abstraction rules
-Avoid:
-- overly abstract helper layers  
-- “smart” utilities hiding logic  
-- magic behavior  
-- unclear function arguments  
-
-Every function must:
-- have a clear purpose  
-- have explicit inputs  
-- have explicit outputs  
-- be easy to locate and understand  
-
----
-
-## 🚫 What Codex Must NOT Do
-
-- Do not assume the structure of Eora datasets without inspection  
-- Do not invent or approximate missing data structures  
-- Do not embed core logic inside notebooks  
-- Do not create unnecessary abstractions  
-- Do not introduce hidden dependencies between modules  
-- Do not write code that relies on implicit state or execution order  
-- Do not prioritize cleverness over clarity  
-
----
-
-## ✅ Definition of Done
+## Definition of Done
 
 A task is complete when:
-- code is modular and well-structured  
-- functions are reusable and clearly scoped  
-- data transformations are explicit and validated  
-- outputs are inspectable and interpretable  
-- assumptions are clearly stated  
-- no hidden behavior or ambiguity remains  
-
----
-
-## 🧩 Philosophy
-
-- Transparency over cleverness  
-- Structure over speed  
-- Control over automation  
-- Reproducibility over convenience  
-- Systems thinking over isolated metrics  
+- code and documentation match the live repository structure
+- transformations are explicit and validated
+- outputs are inspectable and interpretable
+- assumptions are clearly stated
+- no known incorrect reference information remains

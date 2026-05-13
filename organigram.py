@@ -47,22 +47,18 @@ class OrganigramBuilder:
             path=".",
             children=(
                 RepoNode(
-                    label="Raw Eora26 MRIO data",
+                    label="Raw Eora data and labels",
+                    path="data/raw",
+                ),
+                RepoNode(
+                    label="Labelled Eora26 matrices",
                     path="data/parquet",
                     children=(
                         RepoNode("Intermediate transactions", "data/parquet/{year}/T.parquet"),
                         RepoNode("Final demand", "data/parquet/{year}/FD.parquet"),
                         RepoNode("Environmental extensions", "data/parquet/{year}/Q.parquet"),
+                        RepoNode("Environmental final demand", "data/parquet/{year}/QY.parquet"),
                         RepoNode("Value added", "data/parquet/{year}/VA.parquet"),
-                    ),
-                ),
-                RepoNode(
-                    label="Raw Eora labels",
-                    path="data/raw",
-                    children=(
-                        RepoNode("Transaction labels", "data/raw/{year}/labels_T.parquet"),
-                        RepoNode("Final-demand labels", "data/raw/{year}/labels_FD.parquet"),
-                        RepoNode("Environmental labels", "data/raw/{year}/labels_Q.parquet"),
                     ),
                 ),
                 RepoNode(
@@ -87,13 +83,24 @@ class OrganigramBuilder:
                     ),
                 ),
                 RepoNode(
-                    label="ABM data layer",
+                    label="Earlier ABM data layer",
                     path="data/abm",
                     children=(
                         RepoNode("ABM input panel", "data/abm/metrics/abm_metrics_panel.parquet"),
                         RepoNode("Transition diagnostics", "data/abm/diagnostics"),
                         RepoNode("Clean transition model outputs", "data/abm/model_outputs_clean"),
                         RepoNode("Scenario simulation outputs", "data/abm/scenarios"),
+                    ),
+                ),
+                RepoNode(
+                    label="Current ABM v3 and Leontief data layer",
+                    path="data/abm_v3",
+                    children=(
+                        RepoNode("Historical inputs", "data/abm_v3/inputs"),
+                        RepoNode("Diagnostics", "data/abm_v3/diagnostics"),
+                        RepoNode("Validation reports", "data/abm_v3/validation_report"),
+                        RepoNode("Leontief outputs", "data/abm_v3/leontief"),
+                        RepoNode("Scenario phase-space outputs", "data/abm_v3/scenario_phase_space"),
                     ),
                 ),
                 RepoNode(
@@ -115,15 +122,23 @@ class OrganigramBuilder:
                             ),
                         ),
                         RepoNode(
-                            label="Agent-based model",
-                            path="src/abm",
+                            label="Earlier ABM workflows",
+                            path="src/abm_v1",
+                        ),
+                        RepoNode(
+                            label="ABM v2 workflow",
+                            path="src/abm_v2",
+                        ),
+                        RepoNode(
+                            label="Current ABM v3 workflow",
+                            path="src/abm_v3",
                             children=(
-                                RepoNode("Input assembly", "src/abm/metrics.py"),
-                                RepoNode("State update rules", "src/abm/dynamics.py"),
-                                RepoNode("Scenario definitions", "src/abm/scenarii.py"),
-                                RepoNode("ABM class", "src/abm/model.py"),
-                                RepoNode("Simulation runner", "src/abm/runner.py"),
-                                RepoNode("ABM plots", "src/abm/plots.py"),
+                                RepoNode("Path definitions", "src/abm_v3/paths.py"),
+                                RepoNode("Simulation runner", "src/abm_v3/runner.py"),
+                                RepoNode("Dynamics", "src/abm_v3/dynamics"),
+                                RepoNode("Leontief model", "src/abm_v3/leontief"),
+                                RepoNode("Diagnostics", "src/abm_v3/diagnostics"),
+                                RepoNode("Scenarios", "src/abm_v3/scenarios"),
                             ),
                         ),
                         RepoNode(
@@ -140,12 +155,13 @@ class OrganigramBuilder:
                     ),
                 ),
                 RepoNode(
-                    label="Documentation",
-                    path="docs",
+                    label="Marimo notebooks",
+                    path="notebooks",
                     children=(
-                        RepoNode("Conceptual notes"),
-                        RepoNode("LaTeX drafts"),
-                        RepoNode("Methodological writeups"),
+                        RepoNode("EDA notebook", "notebooks/EDA.py"),
+                        RepoNode("ABM scenario explorer", "notebooks/abm_scenario_explorer.py"),
+                        RepoNode("ABM trajectories", "notebooks/abm_country_sector_trajectories.py"),
+                        RepoNode("ABM transition diagnostics", "notebooks/abm_transition_diagnostics.py"),
                     ),
                 ),
             ),
@@ -217,8 +233,8 @@ class MarkdownOrganigramWriter:
 
 
 def main() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-    output_path = repo_root / "docs" / "repo_organigram.md"
+    repo_root = Path(__file__).resolve().parent
+    output_path = repo_root / "repo_organigram.md"
 
     builder = OrganigramBuilder(repo_root=repo_root)
     renderer = MermaidRenderer()

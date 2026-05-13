@@ -2,7 +2,7 @@
 
 Python research code for studying greener configurations in global production networks. The project connects Eora26 input-output matrices, emissions satellite accounts, network metrics, Atlas of Economic Complexity capability data, empirical transition modelling, and agent-based scenario simulation.
 
-The codebase is intentionally research-oriented. The priority is not a polished package API; it is an inspectable pipeline where country-sector relationships, intermediate tables, warnings, and assumptions stay visible.
+The codebase is research-oriented. The priority is an inspectable pipeline where country-sector relationships, intermediate tables, warnings, and assumptions stay visible.
 
 ## Research Aim
 
@@ -10,39 +10,49 @@ This repository asks how green transitions emerge in a system of interconnected 
 
 The central object is a country-sector production node such as `FRA | Agriculture`. The project tracks each node's emissions intensity, direct green-ness, network-embedded green-ness, centrality, capability structure, transition behaviour, and simulated future trajectories.
 
-Recent modelling uses a stricter definition of meaningful emissions improvement: `strict_green_upgrade` is equal to `1` only when a node's `delta_ei` is below the 25th percentile of the full transition dataset. This avoids treating weak or near-zero reductions as substantive green upgrades.
-
 ## Repository Layout
 
 ```text
 Remaster/
 |-- data/
-|   |-- raw/                  # Raw Eora files and archives, kept local
+|   |-- raw/                  # Raw Eora files and labels
 |   |-- parquet/              # Labelled Eora matrices by year
 |   |-- metrics/              # Yearly EI, ET, green-ness, centrality, efficiency outputs
 |   |-- atlas/                # Atlas raw, concordance, and processed capability data
 |   |-- final/                # Merged panels, transition dynamics, estimates
-|   `-- abm/                  # ABM inputs, diagnostics, model outputs, scenarios
+|   |-- abm/                  # Earlier ABM inputs, diagnostics, outputs, scenarios
+|   |-- abm_v3/               # Current ABM v3, Leontief, diagnostics, validation outputs
+|   `-- indices/              # Local index-style data outputs
 |-- notebooks/                # marimo notebooks only
 |-- outputs/                  # Figures, tables, notes, and audit outputs
+|-- logs/                     # Local logs
+|-- tmp/                      # Disposable outputs
 |-- src/
 |   |-- data_manager/         # Eora download, extraction, inspection, parquet conversion
-|   |-- EDA/                  # Older structured Eora EDA workflow
 |   |-- metric_builder/       # EI, ET, network green-ness, centrality, efficiency metrics
 |   |-- atlas_data/           # Atlas download, cleaning, concordance, sector aggregation
 |   |-- modelling/            # Eora-Atlas merge, dynamics, precedence, estimates, clusters
 |   |-- plotting/             # Static transition, trajectory, and phase-space plots
-|   `-- abm/                  # ABM input preparation, diagnostics, models, simulations
-|-- tests/                    # Current smoke tests
+|   |-- abm_v1/               # Earlier ABM preparation, diagnostics, estimation, scenarios
+|   |-- abm_v2/               # ABM v2 model, runner, metrics, plots, audits
+|   `-- abm_v3/               # Current ABM v3, Leontief, validation, scenarios
+|-- tests/                    # Project-level tests
 |-- pyproject.toml
 `-- requirements.txt
 ```
 
 Reusable logic belongs in `src/`. Notebooks should orchestrate and display results, not hide pipeline logic.
 
+## Path Conventions
+
+- Project-level paths are defined in `src.paths`.
+- ABM v3 paths are defined in `src.abm_v3.paths.ABMV3Paths`.
+- Most scripts use project-relative paths such as `data/parquet`, `data/metrics`, `data/final`, `data/abm_v3`, and `outputs/plots`.
+- Raw and generated data are local and are not expected to be complete in every checkout.
+
 ## Main Pipeline
 
-The active workflow is built from explicit script entry points. Most commands use default paths, so the examples below show the usual local order.
+The active workflow is built from explicit module entry points. Most commands use default paths.
 
 ### 1. Prepare Eora Data
 
@@ -65,13 +75,13 @@ data/parquet/<year>/VA.parquet
 
 ### 2. Build Eora Network Metrics
 
-`src/metric_builder/compute_metrics.py` computes the yearly analytical matrices and node metrics:
+`src/metric_builder/compute_metrics.py` computes yearly analytical matrices and node metrics:
 
-- direct emissions intensity, saved as `ei_<year>.parquet`
-- embodied emissions transfers, saved as `et_<year>.parquet`
-- base and network-embedded green-ness, saved as `greenness_<year>.parquet`
-- graph centrality, PageRank, in/out strength, saved as `centrality_<year>.parquet`
-- embodied emissions efficiency, saved as `efficiency_<year>.parquet`
+- direct emissions intensity: `ei_<year>.parquet`
+- embodied emissions transfers: `et_<year>.parquet`
+- base and network-embedded green-ness: `greenness_<year>.parquet`
+- graph centrality, PageRank, in/out strength: `centrality_<year>.parquet`
+- embodied emissions efficiency: `efficiency_<year>.parquet`
 
 Example:
 
@@ -145,18 +155,9 @@ Default output:
 data/final/transition_dynamics.parquet
 ```
 
-`strict_green_upgrade` is computed after all `delta_ei` values exist:
-
-```text
-threshold = 25th percentile of delta_ei
-strict_green_upgrade = 1 when delta_ei < threshold
-```
-
-The original `delta_ei` column is preserved.
-
 ### 6. Estimate Green Precedence
 
-`src/modelling/green_precedence.py` estimates whether exposure to upstream sectors is associated with stricter green upgrade events.
+`src/modelling/green_precedence.py` estimates whether exposure to upstream sectors is associated with green upgrade events.
 
 ```powershell
 python -m src.modelling.green_precedence
@@ -179,8 +180,6 @@ python -m src.modelling.green_precedence --green-event-mode network
 python -m src.modelling.green_precedence --green-event-mode capability
 python -m src.modelling.green_precedence --green-event-mode combined
 ```
-
-In `ei` and `combined` modes, the EI component now uses `strict_green_upgrade` instead of the older `delta_ei < 0` rule.
 
 ### 7. Estimate and Plot Transition Behaviour
 
@@ -218,65 +217,52 @@ Default plot outputs are written under:
 outputs/plots/
 ```
 
-## ABM Workflow
+## ABM Workflows
 
 The ABM layer turns historical country-sector panels into agent states, empirical transition targets, and scenario simulations.
 
-Prepare ABM inputs:
+### Earlier ABM Scripts
+
+Earlier ABM scripts live under `src/abm_v1/` and `src/abm_v2/`.
+
+Representative entry points:
 
 ```powershell
-python -m src.abm.prepare_abm_inputs
+python -m src.abm_v1.prepare_abm_inputs
+python -m src.abm_v1.diagnose_transitions
+python -m src.abm_v1.estimate_transition_model
+python -m src.abm_v1.scenario_runner --scenario baseline
+python -m src.abm_v2.runner
 ```
 
-Outputs:
+Earlier ABM outputs are written under:
 
 ```text
-data/abm/agents_panel.parquet
-data/abm/transitions_panel.parquet
-data/abm/edges_panel.parquet
+data/abm/
 ```
 
-Build transition diagnostics and cleaned targets:
+### Current ABM v3 Workflow
+
+The current structured workflow lives under `src/abm_v3/`. It includes input panel construction, dynamics, Leontief propagation, diagnostics, validation reports, and scenario phase-space analysis.
+
+Primary CLI:
 
 ```powershell
-python -m src.abm.diagnose_transitions
+python -m src.abm_v3.runner --help
 ```
 
-Output:
+Core path helper:
 
 ```text
-data/abm/diagnostics/transitions_with_clean_targets.parquet
+src/abm_v3/paths.py
 ```
 
-Estimate ABM transition models:
-
-```powershell
-python -m src.abm.estimate_transition_model
-python -m src.abm.estimate_regime_transitions
-python -m src.abm.estimate_regime_transitions_balanced
-```
-
-Run a named scenario:
-
-```powershell
-python -m src.abm.scenario_runner --scenario baseline
-python -m src.abm.scenario_runner --scenario network_diffusion
-python -m src.abm.scenario_runner --scenario capability_policy
-python -m src.abm.scenario_runner --scenario brown_core_intervention
-python -m src.abm.scenario_runner --scenario combined_transition
-```
-
-Scenario outputs:
+Current ABM v3 outputs are written under:
 
 ```text
-data/abm/scenarios/<scenario>_simulation_panel.parquet
-data/abm/scenarios/<scenario>_summary_panel.parquet
-```
-
-There is also an older standalone simulator:
-
-```powershell
-python -m src.abm.simulate_abm_v2
+data/abm_v3/
+outputs/plots/abm_v3/
+outputs/plots/scenario/
 ```
 
 ## Notebooks
@@ -287,8 +273,9 @@ Current notebooks:
 
 ```text
 notebooks/EDA.py
-notebooks/abm_scenario_explorer.py
 notebooks/abm_country_sector_trajectories.py
+notebooks/abm_scenario_explorer.py
+notebooks/abm_transition_diagnostics.py
 ```
 
 Open notebooks with:
@@ -318,7 +305,7 @@ Notebook rules:
 | `g_out_network`, `g_in_network` | Network-embedded green-ness measures |
 | Atlas capability | Product/export capability aggregated to Eora26 sectors |
 | `delta_ei` | Next-year minus current emissions intensity |
-| `strict_green_upgrade` | Indicator for `delta_ei` below the dataset's 25th percentile |
+| `strict_green_upgrade` | Indicator for a meaningful emissions-intensity improvement |
 | Green precedence | Upstream-sector exposure associated with green upgrade events |
 | Regime | ABM label combining green/brown status with core/periphery status |
 
@@ -332,12 +319,6 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Some active modelling and ABM scripts import `scikit-learn`. If your environment does not already provide it, install it explicitly:
-
-```powershell
-pip install scikit-learn
-```
-
 ## Testing
 
 Run tests with:
@@ -346,16 +327,13 @@ Run tests with:
 pytest
 ```
 
-Current caveat: `tests/test_paths.py` and `src/config.py` still reference an older `src.paths` scaffold that is not present in the active source tree. Treat failures there as a repository maintenance issue rather than evidence about the analytical pipeline.
-
 ## Current State
 
 This is an active research repository.
 
-- Several modules use pandas even though the project preference is Polars.
+- Several modules use pandas even though the project preference is Polars for new transformation code.
 - Some scripts are executable research entry points rather than stable package APIs.
-- `src/EDA` and some generated `src_tree.json` metadata reflect older stages of the project.
-- `requirements.txt` and `pyproject.toml` are close to the active environment, but the ABM and some plotting scripts also require `scikit-learn`.
+- `src/EDA` and generated metadata such as `src/src_tree.json` reflect older stages of the project.
 - Raw data, parquet matrices, model outputs, and figures are intentionally local and not tracked by git.
 
 ## Working Rules

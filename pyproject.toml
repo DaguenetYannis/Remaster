@@ -31,8 +31,8 @@ dev = [
   "pytest>=9.0",
 ]
 
-[tool.setuptools]
-packages = ["src", "src.io"]
+[tool.setuptools.packages.find]
+include = ["src*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
