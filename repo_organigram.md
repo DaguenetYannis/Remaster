@@ -71,20 +71,36 @@ flowchart TD
     N28 --> N33
     N34["Scenarios\nsrc/abm_v3/scenarios"]
     N28 --> N34
-    N35["Plotting utilities\nsrc/plotting"]
+    N35["ABM v4 phase 1 foundations\nsrc/abm_v4"]
     N21 --> N35
-    N36["Outputs\noutputs"]
-    N1 --> N36
-    N37["Generated figures\noutputs/plots"]
-    N36 --> N37
-    N38["Marimo notebooks\nnotebooks"]
-    N1 --> N38
-    N39["EDA notebook\nnotebooks/EDA.py"]
-    N38 --> N39
-    N40["ABM scenario explorer\nnotebooks/abm_scenario_explorer.py"]
-    N38 --> N40
-    N41["ABM trajectories\nnotebooks/abm_country_sector_trajectories.py"]
-    N38 --> N41
-    N42["ABM transition diagnostics\nnotebooks/abm_transition_diagnostics.py"]
-    N38 --> N42
+    N36["Configuration\nsrc/abm_v4/config.py"]
+    N35 --> N36
+    N37["Path definitions\nsrc/abm_v4/paths.py"]
+    N35 --> N37
+    N38["Schema contracts\nsrc/abm_v4/schemas.py"]
+    N35 --> N38
+    N39["Simulation readiness\nsrc/abm_v4/simulation.py"]
+    N35 --> N39
+    N40["Plotting utilities\nsrc/plotting"]
+    N21 --> N40
+    N41["Outputs\noutputs"]
+    N1 --> N41
+    N42["Generated figures\noutputs/plots"]
+    N41 --> N42
+    N43["Marimo notebooks\nnotebooks"]
+    N1 --> N43
+    N44["EDA notebook\nnotebooks/EDA.py"]
+    N43 --> N44
+    N45["ABM scenario explorer\nnotebooks/abm_scenario_explorer.py"]
+    N43 --> N45
+    N46["ABM trajectories\nnotebooks/abm_country_sector_trajectories.py"]
+    N43 --> N46
+    N47["ABM transition diagnostics\nnotebooks/abm_transition_diagnostics.py"]
+    N43 --> N47
+    N48["Scripts\nscripts"]
+    N1 --> N48
+    N49["ABM v4 base readiness\nscripts/run_abm_v4_base.py"]
+    N48 --> N49
+    N50["ABM v4 implementation note\nabm_v4_implementation_note.md"]
+    N1 --> N50
 ```

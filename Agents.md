@@ -30,6 +30,7 @@ The objective is to keep the full path from raw Eora and Atlas data to analytica
 - `src/abm_v1/` -> earlier ABM preparation, diagnostics, estimation, and scenario scripts.
 - `src/abm_v2/` -> ABM v2 model, runner, metrics, plots, and audit helpers.
 - `src/abm_v3/` -> current structured ABM v3, Leontief, diagnostics, validation, and scenario workflow.
+- `src/abm_v4/` -> Phase 1 foundations for ecosystem-constrained green reorganization.
 - `notebooks/` -> marimo notebooks only.
 - `tests/` and `src/abm_v3/tests/` -> test coverage.
 - `data/raw/` -> raw Eora files and labels.
@@ -39,6 +40,7 @@ The objective is to keep the full path from raw Eora and Atlas data to analytica
 - `data/final/` -> merged panels, transition dynamics, estimates.
 - `data/abm/` -> earlier ABM outputs.
 - `data/abm_v3/` -> current ABM v3 and Leontief outputs.
+- `data/abm_v4/` -> ABM v4 outputs created only by explicit v4 runs.
 - `outputs/` -> generated figures, tables, and audit outputs.
 - `logs/` -> local logs.
 - `tmp/` -> disposable test and development outputs.
@@ -49,6 +51,7 @@ Reusable logic belongs in `src/`. Notebooks should orchestrate computation, disp
 
 - Shared project-level paths live in `src.paths`.
 - ABM v3 path construction lives in `src.abm_v3.paths.ABMV3Paths`.
+- ABM v4 path construction lives in `src.abm_v4.paths.ABMV4Paths`.
 - Use relative project paths such as `data/parquet`, `data/metrics`, and `outputs/plots` in scripts and documentation.
 - Do not hard-code local absolute paths.
 - Do not assume that generated data exists. Check paths, log missing inputs, and continue where possible.
@@ -122,6 +125,7 @@ This project uses marimo, not Jupyter.
 - Do not write code that relies on implicit state or execution order.
 - Do not prioritize cleverness over clarity.
 - Do not delete files under `src/`, `data/`, or `outputs/` unless the user explicitly asks.
+- Do not modify ABM v1, v2, or v3 while implementing ABM v4 unless explicitly requested.
 
 ## Definition of Done
 

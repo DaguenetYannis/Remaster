@@ -142,6 +142,16 @@ class OrganigramBuilder:
                             ),
                         ),
                         RepoNode(
+                            label="ABM v4 phase 1 foundations",
+                            path="src/abm_v4",
+                            children=(
+                                RepoNode("Configuration", "src/abm_v4/config.py"),
+                                RepoNode("Path definitions", "src/abm_v4/paths.py"),
+                                RepoNode("Schema contracts", "src/abm_v4/schemas.py"),
+                                RepoNode("Simulation readiness", "src/abm_v4/simulation.py"),
+                            ),
+                        ),
+                        RepoNode(
                             label="Plotting utilities",
                             path="src/plotting",
                         ),
@@ -163,6 +173,17 @@ class OrganigramBuilder:
                         RepoNode("ABM trajectories", "notebooks/abm_country_sector_trajectories.py"),
                         RepoNode("ABM transition diagnostics", "notebooks/abm_transition_diagnostics.py"),
                     ),
+                ),
+                RepoNode(
+                    label="Scripts",
+                    path="scripts",
+                    children=(
+                        RepoNode("ABM v4 base readiness", "scripts/run_abm_v4_base.py"),
+                    ),
+                ),
+                RepoNode(
+                    label="ABM v4 implementation note",
+                    path="abm_v4_implementation_note.md",
                 ),
             ),
         )

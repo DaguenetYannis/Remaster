@@ -13,6 +13,7 @@ ATLAS_DATA_DIR = DATA_DIR / "atlas"
 FINAL_DATA_DIR = DATA_DIR / "final"
 ABM_DATA_DIR = DATA_DIR / "abm"
 ABM_V3_DATA_DIR = DATA_DIR / "abm_v3"
+ABM_V4_DATA_DIR = DATA_DIR / "abm_v4"
 
 # Kept for older config/tests that still use broad data-stage names.
 INTERIM_DATA_DIR = DATA_DIR / "parquet"

@@ -22,6 +22,7 @@ Remaster/
 |   |-- final/                # Merged panels, transition dynamics, estimates
 |   |-- abm/                  # Earlier ABM inputs, diagnostics, outputs, scenarios
 |   |-- abm_v3/               # Current ABM v3, Leontief, diagnostics, validation outputs
+|   |-- abm_v4/               # ABM v4 outputs, created only by explicit v4 runs
 |   `-- indices/              # Local index-style data outputs
 |-- notebooks/                # marimo notebooks only
 |-- outputs/                  # Figures, tables, notes, and audit outputs
@@ -35,7 +36,8 @@ Remaster/
 |   |-- plotting/             # Static transition, trajectory, and phase-space plots
 |   |-- abm_v1/               # Earlier ABM preparation, diagnostics, estimation, scenarios
 |   |-- abm_v2/               # ABM v2 model, runner, metrics, plots, audits
-|   `-- abm_v3/               # Current ABM v3, Leontief, validation, scenarios
+|   |-- abm_v3/               # Current ABM v3, Leontief, validation, scenarios
+|   `-- abm_v4/               # Phase 1 foundations for ecosystem-constrained green reorganization
 |-- tests/                    # Project-level tests
 |-- pyproject.toml
 `-- requirements.txt
@@ -47,6 +49,7 @@ Reusable logic belongs in `src/`. Notebooks should orchestrate and display resul
 
 - Project-level paths are defined in `src.paths`.
 - ABM v3 paths are defined in `src.abm_v3.paths.ABMV3Paths`.
+- ABM v4 paths are defined in `src.abm_v4.paths.ABMV4Paths`.
 - Most scripts use project-relative paths such as `data/parquet`, `data/metrics`, `data/final`, `data/abm_v3`, and `outputs/plots`.
 - Raw and generated data are local and are not expected to be complete in every checkout.
 
@@ -263,6 +266,22 @@ Current ABM v3 outputs are written under:
 data/abm_v3/
 outputs/plots/abm_v3/
 outputs/plots/scenario/
+```
+
+### ABM v4 Phase 1
+
+ABM v4 is a new namespace for ecosystem-constrained green reorganization in the global production network. Phase 1 provides configuration, path, schema, and diagnostic foundations only; it does not rewrite or overwrite v1, v2, or v3.
+
+Readiness entry point:
+
+```powershell
+python scripts/run_abm_v4_base.py
+```
+
+ABM v4 writes only under:
+
+```text
+data/abm_v4/
 ```
 
 ## Notebooks
