@@ -31,3 +31,5 @@ Thumbs.db
 
 # Local diagnostic files shared manually
 To share/
+
+.tmp/

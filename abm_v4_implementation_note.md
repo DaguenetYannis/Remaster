@@ -215,6 +215,109 @@ Implementation caveat:
 - The raw Eora T panel is very large because the real matrices are close to dense after filtering positive entries. The CLI uses a streaming two-pass writer so Phase 4A-bis does not create an all-to-all long table in memory.
 - This phase still does not implement supplier opportunity sets, supplier rewiring, production simulation, or scenarios.
 
+## Phase 4B-prep Compact Supplier Candidate Base
+
+ABM v4 now reduces the large raw Eora T edge panel into compact candidate tables for later supplier opportunity-set construction. This is a preparation step only; it does not implement final opportunity sets, rewiring, production simulation, or scenarios.
+
+Inputs:
+
+```text
+data/abm_v4/interim/historical_supplier_edges_raw_T.parquet
+data/abm_v4/inputs/abm_v4_state_panel_1995_2016.parquet
+data/abm_v4/inputs/ecosystem_adjacency.csv
+```
+
+Generated outputs:
+
+```text
+data/abm_v4/interim/supplier_candidates_historical_top.parquet
+data/abm_v4/interim/supplier_pool_same_sector.parquet
+data/abm_v4/interim/supplier_pool_ecosystem.parquet
+data/abm_v4/diagnostics/supplier_candidate_base_report.csv
+```
+
+Real-data candidate table sizes:
+
+- Historical top supplier candidates: 122,825 rows
+- Same-sector supplier pool: 122,850 rows
+- Ecosystem supplier pool: 122,875 rows
+- Number of buyers in state panel: 4,915
+- Median historical candidates per buyer: 25
+- Median same-sector candidates per buyer: 25
+- Median ecosystem candidates per buyer: 25
+- Maximum candidates per buyer by type: `historical=25; same_sector=25; ecosystem=25`
+- Share of buyers with no historical candidates: 0.0004069175991861648
+- Share of buyers with no same-sector candidates: 0.0002034587995930824
+- Share of buyers with no ecosystem candidates: 0.0
+
+Memory strategy:
+
+- The full 531,052,530-row raw T edge panel is not loaded into pandas or materialized as a full opportunity table.
+- Historical top candidates are selected with bounded per-buyer heaps from parquet batches, then DuckDB aggregates full-history totals only for the selected compact pair set.
+- Same-sector and ecosystem pools are built from the compact ABM v4 state panel and ecosystem adjacency table.
+- No all-to-all supplier-buyer matrix is created for candidate generation.
+
+Interpretation for Phase 4B:
+
+- `supplier_candidates_historical_top.parquet` is the compact historical backbone from canonical raw Eora T sourcing.
+- `supplier_pool_same_sector.parquet` supplies controlled same-sector alternatives.
+- `supplier_pool_ecosystem.parquet` supplies same-ecosystem and adjacent-ecosystem alternatives, with duplicate candidate flags where a pair already appears in historical or same-sector pools.
+
+## Phase 4B Supplier Opportunity Sets
+
+ABM v4 now builds bounded supplier opportunity sets from the three compact candidate pools. These rows define feasible sourcing alternatives for each buyer. They are not realized rewiring decisions, and supplier weights are not updated in this phase.
+
+Inputs:
+
+```text
+data/abm_v4/interim/supplier_candidates_historical_top.parquet
+data/abm_v4/interim/supplier_pool_same_sector.parquet
+data/abm_v4/interim/supplier_pool_ecosystem.parquet
+data/abm_v4/inputs/abm_v4_state_panel_1995_2016.parquet
+```
+
+Generated outputs:
+
+```text
+data/abm_v4/interim/supplier_opportunity_sets.parquet
+data/abm_v4/diagnostics/supplier_opportunity_set_report.csv
+```
+
+Real-data opportunity-set summary:
+
+- Opportunity rows: 308,920
+- Number of buyers: 4,915
+- Median candidates per buyer: 64
+- 95th percentile candidates per buyer: 75
+- Maximum candidates per buyer: 75
+- Share of rows flagged as historical candidates: 0.3975948465622168
+- Share of rows flagged as same-sector candidates: 0.3976757736630843
+- Share of rows flagged as ecosystem candidates: 0.3977567007639518
+- Share of multi-source candidates: 0.17418425482325522
+- Mean friction: 0.4579648452673831
+- Mean green advantage: 0.0005321805040615166
+- Mean supplier attractiveness: 0.7857205275774213
+
+Probability validation:
+
+- Buyers with probability-sum error: 0
+- Maximum probability-sum error: 2.220446049250313e-16
+- `choice_probability` has no nulls in the generated opportunity set.
+
+Method:
+
+- Candidate pools are merged and deduplicated by `buyer_country_sector + supplier_country_sector`.
+- Source flags are preserved as `candidate_sources`, with separate boolean flags for historical, same-sector, and ecosystem membership.
+- Priority is `historical`, then `same_sector_foreign`, then `ecosystem_feasible`.
+- Friction follows the ABM v4 hierarchy: historical < same-sector < ecosystem.
+- Green advantage uses the latest state year and a buyer-specific historical-supplier green baseline where available.
+- Reliability is a clipped latest-two-year output stability proxy.
+- Choice probabilities are a stable softmax within each buyer.
+
+Caveat:
+
+- These opportunity sets are feasible alternatives only. Phase 4B does not implement realized supplier rewiring, dynamic supplier weight updates, production propagation, or scenarios.
+
 ## Extension from ABM v3
 
 ABM v4 introduces a separate namespace and output root. It can inspect ABM v3 outputs as preferred inputs, but writes only under `data/abm_v4/` when explicitly run.
@@ -261,6 +364,18 @@ Build raw Eora T supplier-buyer edges and compare them with legacy embodied-emis
 
 ```powershell
 python scripts/run_abm_v4_base.py --build-raw-t-supplier-edges --create-output-dirs
+```
+
+Build compact supplier candidate tables for Phase 4B preparation:
+
+```powershell
+python scripts/run_abm_v4_base.py --build-supplier-candidate-base --create-output-dirs
+```
+
+Build supplier opportunity sets from compact candidate tables:
+
+```powershell
+python scripts/run_abm_v4_base.py --build-supplier-opportunities --create-output-dirs
 ```
 
 ## Output Root

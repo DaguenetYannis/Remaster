@@ -14,13 +14,16 @@ def toy_root() -> Path:
 def toy_state_panel() -> pl.DataFrame:
     return pl.DataFrame(
         {
-            "country_sector": ["S1", "S2", "B1", "B2"],
-            "Year": [1995, 1995, 1995, 1995],
-            "Country": ["SUP", "SUP", "BUY", "BUY"],
-            "Sector": ["Inputs", "Inputs", "Output", "Output"],
-            "ecosystem_id": ["eco_inputs", "eco_inputs", "eco_output", "eco_output"],
-            "ecosystem_label": ["Input ecosystem", "Input ecosystem", "Output ecosystem", "Output ecosystem"],
-            "ecosystem_source": ["eora_sector_manual_mapping"] * 4,
+            "country_sector": ["S1", "S2", "S3", "B1", "B2"],
+            "Year": [1995, 1995, 1995, 1995, 1995],
+            "Country": ["SUP", "SUP2", "BUY", "BUY", "BUY"],
+            "Sector": ["Inputs", "Inputs", "Output", "Output", "Output"],
+            "X_observed": [100.0, 200.0, 150.0, 50.0, 60.0],
+            "green_capability": [0.2, 0.8, 0.5, 0.4, 0.3],
+            "g_local_v4": [0.2, 0.8, 0.5, 0.4, 0.3],
+            "ecosystem_id": ["eco_inputs", "eco_inputs", "eco_output", "eco_output", "eco_other"],
+            "ecosystem_label": ["Input ecosystem", "Input ecosystem", "Output ecosystem", "Output ecosystem", "Other ecosystem"],
+            "ecosystem_source": ["eora_sector_manual_mapping"] * 5,
         }
     )
 
@@ -41,6 +44,86 @@ def write_toy_state(paths: ABMV4Paths) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     toy_state_panel().write_parquet(path)
 
+def write_toy_opportunity_state(paths: ABMV4Paths) -> None:
+    path = paths.state_panel_path(1995, 2016)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pl.DataFrame(
+        {
+            "country_sector": ["B1", "S1", "S2", "S3", "B1", "S1", "S2", "S3"],
+            "Year": [1995, 1995, 1995, 1995, 1996, 1996, 1996, 1996],
+            "Country": ["BUY", "SUP", "SUP2", "SUP3", "BUY", "SUP", "SUP2", "SUP3"],
+            "Sector": ["Output", "Inputs", "Inputs", "Output", "Output", "Inputs", "Inputs", "Output"],
+            "X_observed": [100.0, 100.0, 200.0, 100.0, 110.0, 90.0, 220.0, 100.0],
+            "g_local_v4": [0.30, 0.20, 0.70, 0.50, 0.35, 0.25, 0.80, 0.55],
+            "green_capability": [0.30, 0.20, 0.80, 0.60, 0.35, 0.30, 0.85, 0.65],
+            "general_capability": [0.40, 0.50, 0.60, 0.70, 0.45, 0.55, 0.65, 0.75],
+            "ecosystem_id": ["eco_output", "eco_inputs", "eco_inputs", "eco_output"] * 2,
+            "ecosystem_label": ["Output ecosystem", "Input ecosystem", "Input ecosystem", "Output ecosystem"] * 2,
+            "ecosystem_source": ["toy"] * 8,
+        }
+    ).write_parquet(path)
+
+
+def toy_opportunity_candidate_pools() -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+    historical = pl.DataFrame(
+        {
+            "buyer_country_sector": ["B1", "B1"],
+            "supplier_country_sector": ["S1", "S2"],
+            "supplier_type": ["historical", "historical"],
+            "historical_tie_strength": [0.7, 0.3],
+            "mean_historical_share": [0.65, 0.35],
+            "total_transaction_value": [70.0, 30.0],
+            "supplier_country": ["SUP", "SUP2"],
+            "buyer_country": ["BUY", "BUY"],
+            "supplier_sector": ["Inputs", "Inputs"],
+            "buyer_sector": ["Output", "Output"],
+            "supplier_ecosystem_id": ["eco_inputs", "eco_inputs"],
+            "buyer_ecosystem_id": ["eco_output", "eco_output"],
+            "source_type": ["raw_eora_T_top_historical", "raw_eora_T_top_historical"],
+        }
+    )
+    same_sector = pl.DataFrame(
+        {
+            "buyer_country_sector": ["B1"],
+            "supplier_country_sector": ["S2"],
+            "supplier_type": ["same_sector_foreign"],
+            "supplier_rank": [1],
+            "supplier_sector": ["Inputs"],
+            "buyer_sector": ["Output"],
+            "supplier_country": ["SUP2"],
+            "buyer_country": ["BUY"],
+            "supplier_ecosystem_id": ["eco_inputs"],
+            "buyer_ecosystem_id": ["eco_output"],
+            "total_supplier_output_or_transaction_proxy": [420.0],
+            "domestic_fallback_used": [False],
+            "source_type": ["same_sector_pool"],
+        }
+    )
+    ecosystem = pl.DataFrame(
+        {
+            "buyer_country_sector": ["B1", "B1"],
+            "supplier_country_sector": ["S2", "S3"],
+            "supplier_type": ["ecosystem_feasible", "ecosystem_feasible"],
+            "ecosystem_proximity": [0.35, 1.0],
+            "supplier_rank": [1, 2],
+            "supplier_ecosystem_id": ["eco_inputs", "eco_output"],
+            "buyer_ecosystem_id": ["eco_output", "eco_output"],
+            "supplier_ecosystem_label": ["Input ecosystem", "Output ecosystem"],
+            "buyer_ecosystem_label": ["Output ecosystem", "Output ecosystem"],
+            "total_supplier_output_or_transaction_proxy": [420.0, 200.0],
+            "candidate_source_flags": ["historical|same_sector", ""],
+            "source_type": ["ecosystem_pool", "ecosystem_pool"],
+        }
+    )
+    return historical, same_sector, ecosystem
+
+
+def write_toy_opportunity_inputs(paths: ABMV4Paths) -> None:
+    historical, same_sector, ecosystem = toy_opportunity_candidate_pools()
+    paths.interim.mkdir(parents=True, exist_ok=True)
+    historical.write_parquet(paths.supplier_candidates_historical_top_path)
+    same_sector.write_parquet(paths.supplier_pool_same_sector_path)
+    ecosystem.write_parquet(paths.supplier_pool_ecosystem_path)
 
 def write_toy_t_matrix(paths: ABMV4Paths, year: int = 1995) -> None:
     path = paths.data_root / "parquet" / str(year) / "T.parquet"
@@ -52,6 +135,55 @@ def write_toy_t_matrix(paths: ABMV4Paths, year: int = 1995) -> None:
             "B2": [5.0, 20.0],
         }
     ).write_parquet(path)
+
+
+def write_toy_raw_t_edges(paths: ABMV4Paths) -> None:
+    paths.raw_t_supplier_edges_path.parent.mkdir(parents=True, exist_ok=True)
+    pl.DataFrame(
+        {
+            "year": [1995, 1995, 1995, 1995, 1995],
+            "supplier_country_sector": ["S1", "S2", "S3", "S1", "S2"],
+            "buyer_country_sector": ["B1", "B1", "B1", "B2", "B2"],
+            "transaction_value": [10.0, 40.0, 20.0, 8.0, 12.0],
+            "supplier_country": ["SUP", "SUP2", "BUY", "SUP", "SUP2"],
+            "buyer_country": ["BUY", "BUY", "BUY", "BUY", "BUY"],
+            "supplier_sector": ["Inputs", "Inputs", "Output", "Inputs", "Inputs"],
+            "buyer_sector": ["Output", "Output", "Output", "Output", "Output"],
+            "supplier_ecosystem_id": ["eco_inputs", "eco_inputs", "eco_output", "eco_inputs", "eco_inputs"],
+            "buyer_ecosystem_id": ["eco_output", "eco_output", "eco_output", "eco_other", "eco_other"],
+            "supplier_ecosystem_label": [
+                "Input ecosystem",
+                "Input ecosystem",
+                "Output ecosystem",
+                "Input ecosystem",
+                "Input ecosystem",
+            ],
+            "buyer_ecosystem_label": [
+                "Output ecosystem",
+                "Output ecosystem",
+                "Output ecosystem",
+                "Other ecosystem",
+                "Other ecosystem",
+            ],
+            "observed_edge": [True] * 5,
+            "historical_tie_strength": [0.10, 0.50, 0.25, 0.40, 0.60],
+            "historical_share": [0.10, 0.50, 0.25, 0.40, 0.60],
+            "source_file": ["toy"] * 5,
+            "source_type": ["raw_eora_T"] * 5,
+        }
+    ).write_parquet(paths.raw_t_supplier_edges_path)
+
+
+def write_toy_ecosystem_adjacency(paths: ABMV4Paths) -> None:
+    paths.ecosystem_adjacency_path.parent.mkdir(parents=True, exist_ok=True)
+    pl.DataFrame(
+        {
+            "ecosystem_id_from": ["eco_output", "eco_output", "eco_output", "eco_other"],
+            "ecosystem_id_to": ["eco_output", "eco_inputs", "eco_other", "eco_other"],
+            "proximity": [1.0, 0.35, 0.0, 1.0],
+            "relation_type": ["same", "adjacent", "non_adjacent", "same"],
+        }
+    ).write_csv(paths.ecosystem_adjacency_path)
 
 
 def test_supplier_opportunity_uses_explicit_type_vocabulary() -> None:
@@ -320,6 +452,313 @@ def test_raw_t_build_does_not_write_outputs_without_explicit_write() -> None:
     assert not paths.raw_t_supplier_edges_path.exists()
     assert not paths.raw_t_supplier_edge_report_path.exists()
     assert not paths.supplier_edge_source_comparison_path.exists()
+
+
+def test_historical_candidates_are_capped_by_buyer() -> None:
+    root = toy_root()
+    paths = ABMV4Paths(project_root=root)
+    write_toy_state(paths)
+    write_toy_raw_t_edges(paths)
+
+    candidates = SupplierNetworkBuilder(paths=paths).build_historical_top_supplier_candidates(
+        max_historical_suppliers_per_buyer=2
+    )
+
+    assert candidates.group_by("buyer_country_sector").len()["len"].max() == 2
+
+
+def test_historical_candidates_are_ranked_by_tie_strength() -> None:
+    root = toy_root()
+    paths = ABMV4Paths(project_root=root)
+    write_toy_state(paths)
+    write_toy_raw_t_edges(paths)
+
+    candidates = SupplierNetworkBuilder(paths=paths).build_historical_top_supplier_candidates(
+        max_historical_suppliers_per_buyer=2
+    )
+    b1_suppliers = candidates.filter(pl.col("buyer_country_sector") == "B1")[
+        "supplier_country_sector"
+    ].to_list()
+
+    assert b1_suppliers == ["S2", "S3"]
+
+
+def test_same_sector_candidates_exclude_the_buyer_itself() -> None:
+    root = toy_root()
+    paths = ABMV4Paths(project_root=root)
+    write_toy_state(paths)
+
+    pool = SupplierNetworkBuilder(paths=paths).build_same_sector_supplier_pool()
+
+    assert pool.filter(pl.col("buyer_country_sector") == pl.col("supplier_country_sector")).is_empty()
+
+
+def test_same_sector_candidates_respect_candidate_cap() -> None:
+    root = toy_root()
+    paths = ABMV4Paths(project_root=root)
+    write_toy_state(paths)
+
+    pool = SupplierNetworkBuilder(paths=paths).build_same_sector_supplier_pool(
+        max_same_sector_candidates_per_buyer=1
+    )
+
+    assert pool.group_by("buyer_country_sector").len()["len"].max() == 1
+
+
+def test_ecosystem_candidates_use_same_and_adjacent_ecosystems_only() -> None:
+    root = toy_root()
+    paths = ABMV4Paths(project_root=root)
+    write_toy_state(paths)
+    write_toy_ecosystem_adjacency(paths)
+
+    pool = SupplierNetworkBuilder(paths=paths).build_ecosystem_supplier_pool()
+    b1_ecosystems = set(
+        pool.filter(pl.col("buyer_country_sector") == "B1")[
+            "supplier_ecosystem_id"
+        ].to_list()
+    )
+
+    assert b1_ecosystems == {"eco_output", "eco_inputs"}
+    assert "eco_other" not in b1_ecosystems
+
+
+def test_ecosystem_candidates_respect_candidate_cap() -> None:
+    root = toy_root()
+    paths = ABMV4Paths(project_root=root)
+    write_toy_state(paths)
+    write_toy_ecosystem_adjacency(paths)
+
+    pool = SupplierNetworkBuilder(paths=paths).build_ecosystem_supplier_pool(
+        max_ecosystem_candidates_per_buyer=1
+    )
+
+    assert pool.group_by("buyer_country_sector").len()["len"].max() == 1
+
+
+def test_ecosystem_duplicate_candidate_handling_is_explicit() -> None:
+    root = toy_root()
+    paths = ABMV4Paths(project_root=root)
+    write_toy_state(paths)
+    write_toy_ecosystem_adjacency(paths)
+    historical = pl.DataFrame(
+        {
+            "buyer_country_sector": ["B1"],
+            "supplier_country_sector": ["S3"],
+        }
+    )
+    same_sector = pl.DataFrame(
+        {
+            "buyer_country_sector": ["B1"],
+            "supplier_country_sector": ["S3"],
+        }
+    )
+
+    pool = SupplierNetworkBuilder(paths=paths).build_ecosystem_supplier_pool(
+        historical_candidates=historical,
+        same_sector_candidates=same_sector,
+    )
+    duplicate_row = pool.filter(
+        (pl.col("buyer_country_sector") == "B1")
+        & (pl.col("supplier_country_sector") == "S3")
+    ).row(0, named=True)
+
+    assert duplicate_row["candidate_source_flags"] == "historical|same_sector"
+
+
+def test_supplier_candidate_base_report_counts_candidate_types() -> None:
+    root = toy_root()
+    paths = ABMV4Paths(project_root=root)
+    write_toy_state(paths)
+    builder = SupplierNetworkBuilder(paths=paths)
+    historical = pl.DataFrame(
+        {"buyer_country_sector": ["B1"], "supplier_country_sector": ["S1"]}
+    )
+    same_sector = pl.DataFrame(
+        {"buyer_country_sector": ["B1", "B2"], "supplier_country_sector": ["S3", "S3"]}
+    )
+    ecosystem = pl.DataFrame(
+        {"buyer_country_sector": ["B1"], "supplier_country_sector": ["S2"]}
+    )
+
+    report = builder.build_supplier_candidate_base_report(historical, same_sector, ecosystem)
+    row = report.row(0, named=True)
+
+    assert row["historical_candidate_rows"] == 1
+    assert row["same_sector_candidate_rows"] == 2
+    assert row["ecosystem_candidate_rows"] == 1
+
+
+def test_candidate_builders_do_not_create_all_to_all_matrix() -> None:
+    root = toy_root()
+    paths = ABMV4Paths(project_root=root)
+    write_toy_state(paths)
+
+    pool = SupplierNetworkBuilder(paths=paths).build_same_sector_supplier_pool(
+        max_same_sector_candidates_per_buyer=1
+    )
+
+    assert pool.height <= toy_state_panel().height
+
+
+def test_candidate_pools_merge_correctly() -> None:
+    builder = SupplierNetworkBuilder(paths=ABMV4Paths(project_root=toy_root()))
+    historical, same_sector, ecosystem = toy_opportunity_candidate_pools()
+
+    merged = builder.merge_candidate_pools(historical, same_sector, ecosystem)
+
+    assert merged.height == 5
+    assert set(merged["candidate_source"].to_list()) == {"historical", "same_sector", "ecosystem"}
+
+
+def test_duplicate_buyer_supplier_candidates_resolve_to_one_row() -> None:
+    builder = SupplierNetworkBuilder(paths=ABMV4Paths(project_root=toy_root()))
+    historical, same_sector, ecosystem = toy_opportunity_candidate_pools()
+    merged = builder.merge_candidate_pools(historical, same_sector, ecosystem)
+
+    deduplicated = builder.deduplicate_candidates(merged)
+
+    assert deduplicated.filter(
+        (pl.col("buyer_country_sector") == "B1")
+        & (pl.col("supplier_country_sector") == "S2")
+    ).height == 1
+
+
+def test_candidate_source_flags_are_preserved() -> None:
+    builder = SupplierNetworkBuilder(paths=ABMV4Paths(project_root=toy_root()))
+    historical, same_sector, ecosystem = toy_opportunity_candidate_pools()
+    deduplicated = builder.deduplicate_candidates(
+        builder.merge_candidate_pools(historical, same_sector, ecosystem)
+    )
+    row = deduplicated.filter(pl.col("supplier_country_sector") == "S2").row(0, named=True)
+
+    assert row["candidate_sources"] == "historical;same_sector;ecosystem"
+    assert row["is_historical_candidate"]
+    assert row["is_same_sector_candidate"]
+    assert row["is_ecosystem_candidate"]
+
+
+def test_supplier_type_priority_is_historical_then_same_sector_then_ecosystem() -> None:
+    builder = SupplierNetworkBuilder(paths=ABMV4Paths(project_root=toy_root()))
+    historical, same_sector, ecosystem = toy_opportunity_candidate_pools()
+    same_only = same_sector.with_columns(pl.lit("S4").alias("supplier_country_sector"))
+    deduplicated = builder.deduplicate_candidates(
+        builder.merge_candidate_pools(historical, same_only, ecosystem)
+    )
+
+    assert deduplicated.filter(pl.col("supplier_country_sector") == "S2")[
+        "supplier_type"
+    ].item() == "historical"
+    assert deduplicated.filter(pl.col("supplier_country_sector") == "S4")[
+        "supplier_type"
+    ].item() == "same_sector_foreign"
+    assert deduplicated.filter(pl.col("supplier_country_sector") == "S3")[
+        "supplier_type"
+    ].item() == "ecosystem_feasible"
+
+
+def test_supplier_friction_follows_hierarchy() -> None:
+    builder = SupplierNetworkBuilder(paths=ABMV4Paths(project_root=toy_root()))
+    frame = pl.DataFrame(
+        {"supplier_type": ["historical", "same_sector_foreign", "ecosystem_feasible"]}
+    )
+
+    with_friction = builder.compute_supplier_friction(frame)
+
+    assert with_friction["friction"].to_list() == [0.10, 0.50, 1.00]
+
+
+def test_green_advantage_is_computed() -> None:
+    root = toy_root()
+    paths = ABMV4Paths(project_root=root)
+    write_toy_opportunity_state(paths)
+    write_toy_opportunity_inputs(paths)
+
+    opportunities = SupplierNetworkBuilder(paths=paths).build_supplier_opportunity_sets()
+    row = opportunities.filter(pl.col("supplier_country_sector") == "S2").row(0, named=True)
+
+    assert row["green_advantage"] > 0
+
+
+def test_supplier_reliability_is_computed_from_two_years_of_output() -> None:
+    root = toy_root()
+    paths = ABMV4Paths(project_root=root)
+    write_toy_opportunity_state(paths)
+    write_toy_opportunity_inputs(paths)
+
+    opportunities = SupplierNetworkBuilder(paths=paths).build_supplier_opportunity_sets()
+    s1 = opportunities.filter(pl.col("supplier_country_sector") == "S1").row(0, named=True)
+
+    assert abs(s1["supplier_reliability"] - 0.9) < 1e-9
+
+
+def test_supplier_attractiveness_penalizes_friction() -> None:
+    builder = SupplierNetworkBuilder(paths=ABMV4Paths(project_root=toy_root()))
+    base = pl.DataFrame(
+        {
+            "green_advantage": [0.0, 0.0],
+            "supplier_reliability": [0.0, 0.0],
+            "supplier_green_capability": [0.0, 0.0],
+            "supplier_general_capability": [0.0, 0.0],
+            "historical_tie_strength": [0.0, 0.0],
+            "ecosystem_proximity": [0.0, 0.0],
+            "friction": [0.1, 1.0],
+        }
+    )
+
+    scored = builder.compute_supplier_attractiveness(base)
+
+    assert scored["supplier_attractiveness"][0] > scored["supplier_attractiveness"][1]
+
+
+def test_choice_probabilities_sum_to_one_by_buyer() -> None:
+    builder = SupplierNetworkBuilder(paths=ABMV4Paths(project_root=toy_root()))
+    frame = pl.DataFrame(
+        {
+            "buyer_country_sector": ["B1", "B1", "B2"],
+            "supplier_attractiveness": [1.0, 2.0, 0.5],
+        }
+    )
+
+    probabilities = builder.compute_choice_probabilities(frame)
+    sums = probabilities.group_by("buyer_country_sector").agg(pl.sum("choice_probability"))
+
+    assert all(abs(value - 1.0) < 1e-12 for value in sums["choice_probability"].to_list())
+
+
+def test_opportunity_report_detects_probability_sum_errors() -> None:
+    root = toy_root()
+    paths = ABMV4Paths(project_root=root)
+    write_toy_opportunity_state(paths)
+    builder = SupplierNetworkBuilder(paths=paths)
+    bad = pl.DataFrame(
+        {
+            "buyer_country_sector": ["B1", "B1"],
+            "choice_probability": [0.2, 0.2],
+            "is_historical_candidate": [True, False],
+            "is_same_sector_candidate": [False, True],
+            "is_ecosystem_candidate": [False, False],
+            "duplicated_candidate_before_resolution": [False, False],
+            "friction": [0.1, 0.5],
+            "green_advantage": [0.0, 0.1],
+            "supplier_attractiveness": [1.0, 2.0],
+        }
+    )
+
+    report = builder.build_opportunity_set_report(bad)
+
+    assert report["buyers_with_probability_sum_error"].item() == 1
+
+
+def test_opportunity_build_does_not_write_without_explicit_write() -> None:
+    root = toy_root()
+    paths = ABMV4Paths(project_root=root)
+    write_toy_opportunity_state(paths)
+    write_toy_opportunity_inputs(paths)
+
+    SupplierNetworkBuilder(paths=paths).build_supplier_opportunity_sets()
+
+    assert not paths.supplier_opportunity_sets_path.exists()
+    assert not paths.supplier_opportunity_set_report_path.exists()
 
 
 def test_build_historical_edges_does_not_create_all_to_all_edges() -> None:

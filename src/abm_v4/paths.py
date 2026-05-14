@@ -109,6 +109,22 @@ class ABMV4Paths:
         return self.interim / "historical_supplier_edges_raw_T.parquet"
 
     @property
+    def supplier_candidates_historical_top_path(self) -> Path:
+        return self.interim / "supplier_candidates_historical_top.parquet"
+
+    @property
+    def supplier_pool_same_sector_path(self) -> Path:
+        return self.interim / "supplier_pool_same_sector.parquet"
+
+    @property
+    def supplier_pool_ecosystem_path(self) -> Path:
+        return self.interim / "supplier_pool_ecosystem.parquet"
+
+    @property
+    def supplier_opportunity_sets_path(self) -> Path:
+        return self.interim / "supplier_opportunity_sets.parquet"
+
+    @property
     def supplier_edge_report_path(self) -> Path:
         return self.diagnostics / "supplier_edge_report.csv"
 
@@ -119,6 +135,14 @@ class ABMV4Paths:
     @property
     def supplier_edge_source_comparison_path(self) -> Path:
         return self.diagnostics / "supplier_edge_source_comparison.csv"
+
+    @property
+    def supplier_candidate_base_report_path(self) -> Path:
+        return self.diagnostics / "supplier_candidate_base_report.csv"
+
+    @property
+    def supplier_opportunity_set_report_path(self) -> Path:
+        return self.diagnostics / "supplier_opportunity_set_report.csv"
 
     @property
     def supplier_edge_schema_report_path(self) -> Path:

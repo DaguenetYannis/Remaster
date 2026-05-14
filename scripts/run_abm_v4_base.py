@@ -49,6 +49,30 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Build raw Eora T supplier-buyer edges and compare with legacy edges.",
     )
+    parser.add_argument(
+        "--build-supplier-candidate-base",
+        action="store_true",
+        help="Build compact Phase 4B-prep supplier candidate tables.",
+    )
+    parser.add_argument(
+        "--build-supplier-opportunities",
+        action="store_true",
+        help="Build Phase 4B supplier opportunity sets from compact candidate tables.",
+    )
+    parser.add_argument(
+        "--candidate-debug-buyers",
+        type=int,
+        default=None,
+        help="Limit supplier candidate building to the first N buyers for debugging.",
+    )
+    parser.add_argument(
+        "--candidate-debug-years",
+        nargs=2,
+        type=int,
+        metavar=("START", "END"),
+        default=None,
+        help="Limit historical raw-T candidate aggregation to an inclusive year range.",
+    )
     return parser
 
 
@@ -164,6 +188,85 @@ def main() -> None:
         print(f"Unique supplier-buyer pairs: {report_row['unique_supplier_buyer_pairs']}")
         print(f"Raw T supplier edges path: {raw_edges_path}")
         print(f"Edge source comparison path: {comparison_path}")
+        return
+
+    if args.build_supplier_candidate_base:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--build-supplier-candidate-base requires --create-output-dirs to write outputs."
+            )
+        builder = SupplierNetworkBuilder(
+            paths=paths,
+            start_year=config.start_year,
+            end_year=config.end_year,
+        )
+        debug_years = (
+            tuple(args.candidate_debug_years)
+            if args.candidate_debug_years is not None
+            else None
+        )
+        historical_candidates = builder.build_historical_top_supplier_candidates(
+            max_historical_suppliers_per_buyer=25,
+            debug_buyers=args.candidate_debug_buyers,
+            debug_years=debug_years,
+        )
+        same_sector_candidates = builder.build_same_sector_supplier_pool(
+            max_same_sector_candidates_per_buyer=25,
+            debug_buyers=args.candidate_debug_buyers,
+        )
+        ecosystem_candidates = builder.build_ecosystem_supplier_pool(
+            max_ecosystem_candidates_per_buyer=25,
+            historical_candidates=historical_candidates,
+            same_sector_candidates=same_sector_candidates,
+            debug_buyers=args.candidate_debug_buyers,
+        )
+        report = builder.build_supplier_candidate_base_report(
+            historical_candidates=historical_candidates,
+            same_sector_candidates=same_sector_candidates,
+            ecosystem_candidates=ecosystem_candidates,
+        )
+        builder.write_supplier_candidate_base(
+            historical_candidates=historical_candidates,
+            same_sector_candidates=same_sector_candidates,
+            ecosystem_candidates=ecosystem_candidates,
+            report=report,
+        )
+        report_row = report.to_dicts()[0]
+        print("Built compact supplier candidate base.")
+        print(f"Historical candidate rows: {report_row['historical_candidate_rows']}")
+        print(f"Same-sector candidate rows: {report_row['same_sector_candidate_rows']}")
+        print(f"Ecosystem candidate rows: {report_row['ecosystem_candidate_rows']}")
+        print(f"Historical candidates path: {paths.supplier_candidates_historical_top_path}")
+        print(f"Same-sector pool path: {paths.supplier_pool_same_sector_path}")
+        print(f"Ecosystem pool path: {paths.supplier_pool_ecosystem_path}")
+        print(f"Candidate base report path: {paths.supplier_candidate_base_report_path}")
+        return
+
+    if args.build_supplier_opportunities:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--build-supplier-opportunities requires --create-output-dirs to write outputs."
+            )
+        builder = SupplierNetworkBuilder(
+            paths=paths,
+            start_year=config.start_year,
+            end_year=config.end_year,
+        )
+        opportunities = builder.build_supplier_opportunity_sets(
+            supplier_friction=config.supplier_friction,
+            supplier_choice=config.supplier_choice,
+            beta_supplier_choice=getattr(config.supplier_choice, "beta_supplier_choice", 1.0),
+            epsilon=config.epsilon,
+        )
+        report = builder.build_opportunity_set_report(opportunities)
+        builder.write_supplier_opportunity_sets(opportunities, report)
+        report_row = report.to_dicts()[0]
+        print("Built supplier opportunity sets.")
+        print(f"Opportunity rows: {report_row['opportunity_rows']}")
+        print(f"Median candidates per buyer: {report_row['median_candidates_per_buyer']}")
+        print(f"Buyers with probability sum error: {report_row['buyers_with_probability_sum_error']}")
+        print(f"Opportunity set path: {paths.supplier_opportunity_sets_path}")
+        print(f"Opportunity set report path: {paths.supplier_opportunity_set_report_path}")
         return
 
     if args.create_output_dirs:
