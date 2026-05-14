@@ -8,7 +8,7 @@ from src.abm_v4.capabilities import CapabilityUpdater, IOCapabilityBuilder
 from src.abm_v4.config import ABMV4Config
 from src.abm_v4.diagnostics import build_path_audit_rows, format_path_audit_table
 from src.abm_v4.ecosystem import EcosystemMapper
-from src.abm_v4.emissions import EmissionsUpdater
+from src.abm_v4.emissions import EmissionsTransitionCalibrator, EmissionsUpdater
 from src.abm_v4.paths import ABMV4Paths
 from src.abm_v4.production import ProductionFeasibilityEngine
 from src.abm_v4.simulation import (
@@ -18,6 +18,7 @@ from src.abm_v4.simulation import (
 )
 from src.abm_v4.state import build_state_panel, repair_capability_coverage
 from src.abm_v4.suppliers import SupplierNetworkBuilder
+from src.abm_v4.validation import MultiYearHistoricalValidator
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -107,6 +108,20 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run Phase 10 historical multi-year ABM v4 base simulation.",
     )
+    parser.add_argument(
+        "--validate-multiyear-base",
+        action="store_true",
+        help="Build Phase 11 historical validation and calibration diagnostics for the multi-year base run.",
+    )
+    parser.add_argument(
+        "--calibrate-emissions-transition",
+        action="store_true",
+        help="Build Phase 12 emissions-transition parameter calibration diagnostics.",
+    )
+    parser.add_argument("--calibration-random-search-iterations", type=int, default=200)
+    parser.add_argument("--calibration-seed", type=int, default=42)
+    parser.add_argument("--calibration-train-end-year", type=int, default=2011)
+    parser.add_argument("--calibration-validation-start-year", type=int, default=2012)
     parser.add_argument(
         "--historical-production-forcing",
         action=argparse.BooleanOptionalAction,
@@ -609,6 +624,49 @@ def main() -> None:
         print(f"State panel: {paths.base_multiyear_state_panel_path}")
         print(f"Summary panel: {paths.base_multiyear_summary_panel_path}")
         print(f"Validation report: {paths.base_multiyear_validation_report_path}")
+        return
+
+    if args.validate_multiyear_base:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--validate-multiyear-base requires --create-output-dirs to write validation outputs."
+            )
+        validator = MultiYearHistoricalValidator(paths=paths, config=config)
+        result = validator.build()
+        validator.write_outputs(result)
+        latest = result.error_summary.sort("year").tail(1).to_dicts()[0]
+        print("Built ABM v4 multi-year historical validation diagnostics.")
+        print(f"Latest year: {latest['year']}")
+        print(f"Latest aggregate emissions pct error: {latest['aggregate_emissions_pct_error']}")
+        print(f"Error panel: {paths.multiyear_error_panel_path}")
+        print(f"Error summary: {paths.multiyear_error_summary_path}")
+        print(f"Markdown report: {paths.multiyear_validation_report_md_path}")
+        return
+
+    if args.calibrate_emissions_transition:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--calibrate-emissions-transition requires --create-output-dirs to write validation outputs."
+            )
+        calibrator = EmissionsTransitionCalibrator(
+            paths=paths,
+            start_year=config.start_year,
+            end_year=config.end_year,
+            config=config.emissions,
+            random_search_iterations=args.calibration_random_search_iterations,
+            seed=args.calibration_seed,
+            train_end_year=args.calibration_train_end_year,
+            validation_start_year=args.calibration_validation_start_year,
+        )
+        result = calibrator.run()
+        calibrator.write_outputs(result)
+        validation = result.validation_summary.filter(pl.col("split") == "validation").to_dicts()[0]
+        print("Built ABM v4 emissions-transition calibration diagnostics.")
+        print(f"Calibration rows: {result.dataset.height}")
+        print(f"Validation MAE: {validation['mae']}")
+        print(f"Validation bias: {validation['bias']}")
+        print(f"Best parameters: {paths.emissions_best_parameters_path}")
+        print(f"Calibration report: {paths.emissions_calibration_report_path}")
         return
 
     if args.create_output_dirs:

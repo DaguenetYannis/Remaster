@@ -971,6 +971,178 @@ Readiness assessment:
 - The model is not yet ready for policy scenario design until production dynamics are no longer historically forced or the forcing mode is explicitly accepted for the intended scenario question.
 - Next recommended phase: replace or extend the historically forced production step with a recursive production propagation/update layer, then rerun historical validation before scenario design.
 
+## Phase 11 Multi-Year Historical Validation
+
+Phase 11 adds a validation and calibration diagnostic layer over the existing multi-year base outputs. It does not rerun the simulation and does not rebuild raw-T edges.
+
+Outputs created:
+
+- `data/abm_v4/validation/multiyear_error_panel.parquet`
+- `data/abm_v4/validation/multiyear_error_summary.csv`
+- `data/abm_v4/validation/multiyear_error_by_sector.csv`
+- `data/abm_v4/validation/multiyear_error_by_country.csv`
+- `data/abm_v4/validation/multiyear_error_by_ecosystem.csv`
+- `data/abm_v4/validation/multiyear_error_by_capability_source.csv`
+- `data/abm_v4/validation/multiyear_calibration_targets.csv`
+- `data/abm_v4/validation/multiyear_validation_report.md`
+
+Aggregate validation result:
+
+| Year | Total emissions observed | Total emissions simulated | Aggregate emissions pct error | Mean observed rEI | Mean simulated rEI |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 2014 | 44824394.06247388 | 83015127.1275825 | 0.8520077931645968 | -0.04260265861543819 | 0.017886083077941862 |
+| 2015 | 45677594.92734783 | 77126132.06575437 | 0.6884893389949007 | 0.07367152408091936 | 0.017789086175923802 |
+| 2016 | 41772432.07913907 | 74409228.00315851 | 0.7812998740937108 |  |  |
+
+Interpretation:
+
+- The model is dynamically valid in the narrow accounting sense: emissions identity errors remain zero in the multi-year output.
+- It is not historically calibrated: aggregate emissions are substantially above observed values in the latest years.
+- The simulation should move to parameter calibration diagnostics before any scenario design.
+
+Largest error sources by sector:
+
+| Sector | Mean log EI error | Mean emissions absolute error | Total emissions error | Mean rEI error | Mean rEI absolute error |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| TOTAL | -0.08404570225011163 | 542253.9879711973 | -6541205.9230980845 | -0.02748882037703813 | 0.44754885035641273 |
+| Electricity, Gas and Water | 0.019032623572086047 | 53885.968647542526 | 158650077.27881142 | -0.019023076010589217 | 0.17706909008240282 |
+| Mining and Quarrying | 0.13099169021990115 | 11953.460123371668 | 34715708.07038643 | -0.014780262808256596 | 0.16383501234999598 |
+| Petroleum, Chemical and Non-Metallic Mineral Products | 0.09520448150108303 | 11584.919680904603 | 39705484.3604227 | -0.009116684751067153 | 0.13349612629189528 |
+| Finacial Intermediation and Business Activities | 0.061234206382538674 | 9764.501211328985 | 28536980.287694596 | 0.0036111262548990195 | 0.13078000685549857 |
+
+Largest error sources by country:
+
+| Country | Mean log EI error | Mean emissions absolute error | Total emissions error | Mean rEI absolute error |
+| --- | ---: | ---: | ---: | ---: |
+| ROW | -0.08404570225011163 | 542253.9879711973 | -6541205.9230980845 | 0.44754885035641273 |
+| CHN | 0.378931844976257 | 366683.9002176758 | 203699524.60279736 | 0.12195129016222771 |
+| RUS | 0.5745027210294936 | 82333.79768247434 | 41867355.28596649 | 0.19430415718600977 |
+| USA | 0.32103612615866767 | 56937.10018006292 | 27994758.265063148 | 0.06933434033316464 |
+| IRQ | 1.4401996295463073 | 42933.66359391446 | 24552975.092382155 | 0.19322962552054715 |
+
+Capability-source diagnostics:
+
+| Capability source type | Source | Rows | Mean log EI error | Mean emissions absolute error | Total emissions error | Mean rEI absolute error |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| general_capability_source | atlas_observed | 63905 | 0.09595401739356997 | 3523.7375601266544 | 176096158.12446445 | 0.13994984118189915 |
+| general_capability_source | io_imputed | 34135 | 0.14792763555482255 | 8461.595118938605 | 190317656.19906092 | 0.14480161514082723 |
+| general_capability_source | unavailable | 10090 | 0.17551092482946185 | 1388.8677385084738 | 3723167.305530755 | 0.1526356790888614 |
+| green_capability_source | atlas_observed | 63905 | 0.09595401739356997 | 3523.7375601266544 | 176096158.12446445 | 0.13994984118189915 |
+| green_capability_source | io_imputed | 28885 | 0.16141864118654428 | 9614.593596967376 | 185554627.85910073 | 0.14673532437442885 |
+| green_capability_source | unavailable | 15340 | 0.13231153747263857 | 1376.1570623454136 | 8486195.645490965 | 0.14494920594206948 |
+
+Interpretation of capability sources:
+
+- IO-imputed capability does not obviously break transition dynamics, but it is associated with larger EI and emissions errors than Atlas-observed capability.
+- `calibrated_io` remains acceptable as a source-aware proxy for integration, but it should be a calibration slice rather than treated as observed Atlas capability.
+- Green IO-imputed capability remains cautious because Phase 9D showed it is effectively downstream-proxy driven.
+
+Calibration target diagnostics:
+
+- Most high-error sectors show negative rEI bias, meaning simulated EI reductions are generally slower than observed historical reductions.
+- Suggested priorities include increasing readiness for several sectors, adjusting sector background trends where bias is smaller, and inspecting capability source for structurally hard-to-measure sectors.
+- Top calibration targets include `TOTAL`, `Re-export & Re-import`, `Electricity, Gas and Water`, `Mining and Quarrying`, `Fishing`, `Recycling`, `Private Households`, and `Transport`.
+
+Scenario readiness:
+
+- The model is ready for parameter calibration diagnostics.
+- It is still too early for scenarios because production is historically forced and emissions fit is not historically calibrated.
+- Next recommended step: calibrate or tune frontier-gap readiness/background terms against observed historical rEI, while tracking errors by sector, capability source, and ecosystem.
+
+## Phase 12 Emissions-Transition Calibration Scaffold
+
+Phase 12 adds historically disciplined parameter-search diagnostics for the frontier-gap readiness emissions rule. This is not structural estimation and it does not overwrite `config.py`.
+
+Calibration setup:
+
+- Calibration target: observed historical `rEI = log(EI_t) - log(EI_t+1)`
+- Valid calibration rows: 85,653
+- Train years: 1995-2011
+- Validation years: 2012-2016
+- Search method: fixed-seed bounded random search
+- Random-search iterations: 200
+- Seed: 42
+
+Selected parameter candidate:
+
+| Parameter | Value |
+| --- | ---: |
+| rho_max | 0.03562892698694528 |
+| theta_intercept | -2.451060778970692 |
+| theta_gcap | 0.7665585120643779 |
+| theta_cap | 0.6562447118756822 |
+| theta_network_green | 0.015459813138623879 |
+| theta_ecosystem_exposure | 1.4940282468595356 |
+| theta_brown_centrality | 0.3513896037516846 |
+| theta_supplier_lockin | 0.7604148914304725 |
+| tau_gap | 3.547989190575052 |
+
+Selected validation metrics:
+
+| Metric | Train | Validation |
+| --- | ---: | ---: |
+| MAE | 0.1353682585007423 | 0.171197657560396 |
+| RMSE | 0.21323638022465835 | 0.3206618584081736 |
+| Median absolute error | 0.09407075577715189 | 0.0935372319332673 |
+| Bias | 0.006342601870672514 | 0.026873174008266998 |
+| Wrong-sign share | 0.35975204462040866 | 0.5366328205751809 |
+| Correlation | 0.04129744150110398 | -0.023742993681002883 |
+| Sector-weighted MAE | 0.14464511979869413 | 0.18718691294511328 |
+
+Model comparison:
+
+| Model | Validation MAE | Validation bias | Wrong-sign share | Validation correlation |
+| --- | ---: | ---: | ---: | ---: |
+| sector_background_only | 0.1711255188900063 | 0.02665680438012231 | 0.5366328205751809 | -0.027566604376771088 |
+| frontier_gap_readiness | 0.171197657560396 | 0.026873174008266998 | 0.5366328205751809 | -0.023742993681002883 |
+| readiness_without_capability | 0.1712014252062674 | 0.02689175462296123 | 0.5366328205751809 | -0.022172110324640053 |
+| frontier_gap_only | 0.17294619773103434 | 0.032116767144703386 | 0.5366328205751809 | 0.0735110101602798 |
+| legacy_raw_log | 0.274073841347476 | 0.17337859933665706 | 0.5367544232990819 | -0.045005970776762806 |
+
+Interpretation:
+
+- The full frontier-gap readiness model does not meaningfully outperform `sector_background_only` on validation MAE in this scaffold.
+- `readiness_without_capability` performs almost identically to the full model, so the current capability terms are not yet empirically contributing enough.
+- `frontier_gap_only` is worse than the full model on validation MAE, which suggests the readiness gate helps relative to ungated gap closure, but the gain is small.
+- `legacy_raw_log` performs clearly worse and remains theoretically fragile, so it should stay comparison-only.
+- Validation correlation is near zero and slightly negative for the selected full model.
+- Wrong-sign share is high at about 0.5366, so the scaffold is not yet strong enough to claim good historical transition prediction.
+
+Parameter plausibility:
+
+- Theoretical signs are respected.
+- `theta_network_green` is near its lower bound, suggesting network-green exposure is weakly identified in this current specification.
+- No multiple-bound solution was selected, so the search is not obviously pinned to parameter limits.
+- `rho_max = 0.0356` implies a conservative maximum annual readiness-gated EI reduction rate.
+- `tau_gap = 3.548` makes gap closure fairly gradual.
+
+Largest validation errors by sector:
+
+| Sector | MAE | Bias | Wrong-sign share |
+| --- | ---: | ---: | ---: |
+| TOTAL | 0.5694513676674693 | -0.20789964955816886 | 0.75 |
+| Re-export & Re-import | 0.3288742958921291 | -0.127350579232948 | 0.4859550561797753 |
+| Fishing | 0.26963669798662127 | -0.08580225215885369 | 0.5048543689320388 |
+| Electricity, Gas and Water | 0.21316204608614422 | -0.02680119856814984 | 0.4899425287356322 |
+| Agriculture | 0.20556656263823708 | -0.05513525083746763 | 0.5070224719101124 |
+
+Error by capability source:
+
+| Capability source type | Source | Rows | MAE | Bias | Wrong-sign share |
+| --- | --- | ---: | ---: | ---: | ---: |
+| general_capability_source | atlas_observed | 11351 | 0.1679096621389368 | 0.0226599767095571 | 0.5297330631662409 |
+| general_capability_source | io_imputed | 5096 | 0.17852144798994538 | 0.03625778989085255 | 0.5520015698587127 |
+| green_capability_source | atlas_observed | 11351 | 0.1679096621389368 | 0.0226599767095571 | 0.5297330631662409 |
+| green_capability_source | io_imputed | 5096 | 0.17852144798994538 | 0.03625778989085255 | 0.5520015698587127 |
+
+Conclusion:
+
+- The calibration scaffold works and produces the required outputs.
+- The selected parameter candidate is exploratory only.
+- The full frontier-gap readiness mechanism is theoretically safer than raw-log EI, but this run does not yet provide strong empirical validation beyond sector background trends.
+- It is not strong enough yet for a calibrated historical simulation intended to support scenarios.
+- Next recommended step: improve the calibration design before scenarios, especially by revisiting sector background trends, feature scaling, capability contribution, and sign-prediction performance.
+
 ## Extension from ABM v3
 
 ABM v4 introduces a separate namespace and output root. It can inspect ABM v3 outputs as preferred inputs, but writes only under `data/abm_v4/` when explicitly run.
@@ -1071,6 +1243,18 @@ Run the full historical multi-year base simulation:
 
 ```powershell
 python scripts/run_abm_v4_base.py --run-multiyear-base --start-year 1995 --end-year 2016 --create-output-dirs --reuse-existing
+```
+
+Validate the multi-year base run against historical observed values:
+
+```powershell
+python scripts/run_abm_v4_base.py --validate-multiyear-base --create-output-dirs
+```
+
+Build emissions-transition calibration diagnostics:
+
+```powershell
+python scripts/run_abm_v4_base.py --calibrate-emissions-transition --create-output-dirs --calibration-random-search-iterations 200
 ```
 
 ## Output Root

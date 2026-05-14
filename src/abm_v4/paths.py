@@ -257,6 +257,74 @@ class ABMV4Paths:
         return self.validation / "one_step_base_status.json"
 
     @property
+    def multiyear_error_panel_path(self) -> Path:
+        return self.validation / "multiyear_error_panel.parquet"
+
+    @property
+    def multiyear_error_summary_path(self) -> Path:
+        return self.validation / "multiyear_error_summary.csv"
+
+    @property
+    def multiyear_error_by_sector_path(self) -> Path:
+        return self.validation / "multiyear_error_by_sector.csv"
+
+    @property
+    def multiyear_error_by_country_path(self) -> Path:
+        return self.validation / "multiyear_error_by_country.csv"
+
+    @property
+    def multiyear_error_by_ecosystem_path(self) -> Path:
+        return self.validation / "multiyear_error_by_ecosystem.csv"
+
+    @property
+    def multiyear_error_by_capability_source_path(self) -> Path:
+        return self.validation / "multiyear_error_by_capability_source.csv"
+
+    @property
+    def multiyear_calibration_targets_path(self) -> Path:
+        return self.validation / "multiyear_calibration_targets.csv"
+
+    @property
+    def multiyear_validation_report_md_path(self) -> Path:
+        return self.validation / "multiyear_validation_report.md"
+
+    @property
+    def emissions_calibration_dataset_path(self) -> Path:
+        return self.validation / "emissions_calibration_dataset.parquet"
+
+    @property
+    def emissions_parameter_search_results_path(self) -> Path:
+        return self.validation / "emissions_parameter_search_results.csv"
+
+    @property
+    def emissions_best_parameters_path(self) -> Path:
+        return self.validation / "emissions_best_parameters.json"
+
+    @property
+    def emissions_calibration_validation_summary_path(self) -> Path:
+        return self.validation / "emissions_calibration_validation_summary.csv"
+
+    @property
+    def emissions_calibration_by_sector_path(self) -> Path:
+        return self.validation / "emissions_calibration_by_sector.csv"
+
+    @property
+    def emissions_calibration_by_capability_source_path(self) -> Path:
+        return self.validation / "emissions_calibration_by_capability_source.csv"
+
+    @property
+    def emissions_model_comparison_path(self) -> Path:
+        return self.validation / "emissions_model_comparison.csv"
+
+    @property
+    def emissions_parameter_plausibility_path(self) -> Path:
+        return self.validation / "emissions_parameter_plausibility.csv"
+
+    @property
+    def emissions_calibration_report_path(self) -> Path:
+        return self.validation / "emissions_calibration_report.md"
+
+    @property
     def base_multiyear_state_panel_path(self) -> Path:
         return self.simulations / "base_multiyear_state_panel.parquet"
 

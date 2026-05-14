@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import math
+import random
 from dataclasses import dataclass
+from typing import Any
 
 import polars as pl
 
@@ -25,6 +28,21 @@ class EmissionsDecomposition:
     residual: float
     aggregate_output_loss_pct: float
     bad_transition_flag: bool
+
+
+@dataclass(frozen=True)
+class EmissionsCalibrationResult:
+    """Artifacts from emissions-transition calibration diagnostics."""
+
+    dataset: pl.DataFrame
+    search_results: pl.DataFrame
+    best_parameters: dict[str, Any]
+    validation_summary: pl.DataFrame
+    by_sector: pl.DataFrame
+    by_capability_source: pl.DataFrame
+    model_comparison: pl.DataFrame
+    parameter_plausibility: pl.DataFrame
+    markdown: str
 
 
 def emissions_identity(output: float, emissions_intensity: float) -> float:
@@ -897,3 +915,798 @@ class EmissionsTransitionEngine:
 
 class EmissionsUpdater(EmissionsTransitionEngine):
     """Backward-compatible name for the emissions transition engine."""
+
+
+class EmissionsTransitionCalibrator:
+    """Historically disciplined parameter-search scaffold for rEI transitions."""
+
+    PARAMETER_BOUNDS: dict[str, tuple[float, float]] = {
+        "rho_max": (0.005, 0.15),
+        "theta_intercept": (-3.0, 1.0),
+        "theta_gcap": (0.0, 3.0),
+        "theta_cap": (0.0, 2.0),
+        "theta_network_green": (0.0, 2.0),
+        "theta_ecosystem_exposure": (0.0, 2.0),
+        "theta_brown_centrality": (0.0, 2.0),
+        "theta_supplier_lockin": (0.0, 2.0),
+        "tau_gap": (0.1, 5.0),
+    }
+
+    def __init__(
+        self,
+        paths: ABMV4Paths,
+        *,
+        start_year: int = 1995,
+        end_year: int = 2016,
+        config: EmissionsConfig | None = None,
+        random_search_iterations: int = 200,
+        seed: int = 42,
+        train_end_year: int = 2011,
+        validation_start_year: int = 2012,
+    ) -> None:
+        self.paths = paths
+        self.start_year = start_year
+        self.end_year = end_year
+        self.config = config or EmissionsConfig()
+        self.random_search_iterations = random_search_iterations
+        self.seed = seed
+        self.train_end_year = train_end_year
+        self.validation_start_year = validation_start_year
+
+    def load_state_panel(self) -> pl.DataFrame:
+        """Load the ABM v4 state panel."""
+        state_path = self.paths.state_panel_path(self.start_year, self.end_year)
+        if not state_path.exists():
+            canonical = self.paths.state_panel_path(1995, 2016)
+            if canonical.exists():
+                return pl.read_parquet(canonical)
+            raise FileNotFoundError(f"ABM v4 state panel not found: {state_path}")
+        return pl.read_parquet(state_path)
+
+    def load_supplier_weights(self) -> pl.DataFrame | None:
+        """Load supplier weights for supplier-lock-in diagnostics."""
+        if not self.paths.supplier_updated_weights_path.exists():
+            return None
+        return pl.read_parquet(self.paths.supplier_updated_weights_path)
+
+    def build_calibration_dataset(self, state_panel: pl.DataFrame | None = None) -> pl.DataFrame:
+        """Build valid node-year observations for rEI calibration."""
+        state = self.load_state_panel() if state_panel is None else state_panel
+        state = state.filter(pl.col("Year").is_between(self.start_year, self.end_year))
+        base = self._prepare_state_features(state)
+        base = self._add_sector_frontiers(base)
+        base = self._add_sector_background_trend(base)
+        base = self._add_supplier_lockin(base)
+        return (
+            base.sort(["country_sector", "year"])
+            .with_columns(
+                pl.col("year").shift(-1).over("country_sector").alias("next_year"),
+                pl.col("EI").shift(-1).over("country_sector").alias("EI_next_observed"),
+            )
+            .filter(
+                (pl.col("next_year") == pl.col("year") + 1)
+                & (pl.col("EI") > 0)
+                & (pl.col("EI_next_observed") > 0)
+            )
+            .with_columns(
+                (pl.col("EI").log() - pl.col("EI_next_observed").log()).alias("observed_rEI")
+            )
+            .filter(
+                pl.all_horizontal(
+                    pl.col("observed_rEI").is_not_null(),
+                    pl.col("ei_gap").is_not_null(),
+                    pl.col("cap_model").is_not_null(),
+                    pl.col("gcap_model").is_not_null(),
+                    pl.col("network_green_exposure").is_not_null(),
+                    pl.col("ecosystem_capability_exposure").is_not_null(),
+                    pl.col("brown_centrality").is_not_null(),
+                    pl.col("supplier_lockin").is_not_null(),
+                )
+            )
+            .select(
+                "country_sector",
+                "year",
+                "next_year",
+                "Sector",
+                "Country",
+                "ecosystem_id",
+                "observed_rEI",
+                "ei_gap",
+                "cap_model",
+                "gcap_model",
+                "general_capability_source",
+                "green_capability_source",
+                "network_green_exposure",
+                "ecosystem_capability_exposure",
+                "brown_centrality",
+                "supplier_lockin",
+                "sector_background_trend",
+                "log_EI",
+            )
+        )
+
+    def split_train_validation(self, dataset: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
+        """Split by time so validation remains out-of-sample in years."""
+        return (
+            dataset.filter(pl.col("year") <= self.train_end_year),
+            dataset.filter(pl.col("year") >= self.validation_start_year),
+        )
+
+    def sample_parameter_sets(self) -> list[dict[str, float]]:
+        """Sample bounded parameters with fixed seed and sign constraints."""
+        rng = random.Random(self.seed)
+        sampled: list[dict[str, float]] = [self._default_parameter_set()]
+        for _ in range(max(0, self.random_search_iterations - 1)):
+            sampled.append(
+                {
+                    name: rng.uniform(lower, upper)
+                    for name, (lower, upper) in self.PARAMETER_BOUNDS.items()
+                }
+            )
+        return sampled
+
+    def evaluate_parameter_set(
+        self,
+        params: dict[str, float],
+        train: pl.DataFrame,
+        validation: pl.DataFrame,
+        *,
+        model_name: str = "frontier_gap_readiness",
+    ) -> dict[str, Any]:
+        """Evaluate a parameter set against train and validation splits."""
+        train_pred = self.predict_rEI(train, params, model_name=model_name)
+        validation_pred = self.predict_rEI(validation, params, model_name=model_name)
+        return {
+            **params,
+            "model_name": model_name,
+            **self._prefix_metrics(self.compute_metrics(train_pred), "train"),
+            **self._prefix_metrics(self.compute_metrics(validation_pred), "validation"),
+        }
+
+    def run_parameter_search(self, dataset: pl.DataFrame) -> pl.DataFrame:
+        """Run random search and mark the lowest validation-MAE candidate."""
+        train, validation = self.split_train_validation(dataset)
+        rows = [
+            self.evaluate_parameter_set(params, train, validation)
+            for params in self.sample_parameter_sets()
+        ]
+        results = pl.DataFrame(rows).sort("validation_mae").with_row_index("_row")
+        return results.with_columns((pl.col("_row") == 0).alias("selected")).drop("_row")
+
+    def select_best_parameters(self, search_results: pl.DataFrame) -> dict[str, float]:
+        """Return the selected validation-MAE-minimizing parameters."""
+        row = search_results.sort("validation_mae").to_dicts()[0]
+        return {name: float(row[name]) for name in self.PARAMETER_BOUNDS}
+
+    def evaluate_baseline_models(
+        self,
+        dataset: pl.DataFrame,
+        selected_params: dict[str, float],
+    ) -> pl.DataFrame:
+        """Compare full frontier-gap readiness with simpler baselines."""
+        train, validation = self.split_train_validation(dataset)
+        rows: list[dict[str, Any]] = []
+        specs = [
+            ("frontier_gap_readiness", "Selected full frontier-gap readiness specification."),
+            ("sector_background_only", "Uses only median historical sector rEI."),
+            ("frontier_gap_only", "Uses sector background plus ungated frontier gap closure."),
+            ("readiness_without_capability", "Readiness excludes general and green capability terms."),
+            ("legacy_raw_log", "Legacy raw-log rule retained only as a comparison."),
+        ]
+        for model_name, notes in specs:
+            metrics = self.evaluate_parameter_set(
+                selected_params,
+                train,
+                validation,
+                model_name=model_name,
+            )
+            rows.append(
+                {
+                    "model_name": model_name,
+                    "train_mae": metrics["train_mae"],
+                    "validation_mae": metrics["validation_mae"],
+                    "train_rmse": metrics["train_rmse"],
+                    "validation_rmse": metrics["validation_rmse"],
+                    "train_bias": metrics["train_bias"],
+                    "validation_bias": metrics["validation_bias"],
+                    "validation_wrong_sign_share": metrics["validation_wrong_sign_share"],
+                    "validation_correlation": metrics["validation_correlation"],
+                    "notes": notes,
+                }
+            )
+        return pl.DataFrame(rows).sort("validation_mae")
+
+    def validate_best_parameters(
+        self,
+        dataset: pl.DataFrame,
+        selected_params: dict[str, float],
+    ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+        """Build selected-parameter summary and grouped validation diagnostics."""
+        predictions = self.predict_rEI(
+            dataset,
+            selected_params,
+            model_name="frontier_gap_readiness",
+        )
+        train, validation = self.split_train_validation(predictions)
+        summary = pl.DataFrame(
+            [
+                {"split": "train", **self.compute_metrics(train)},
+                {"split": "validation", **self.compute_metrics(validation)},
+            ]
+        )
+        by_sector = self._group_prediction_metrics(validation, ["Sector"]).sort(
+            "mae", descending=True
+        )
+        by_source = self._capability_source_prediction_metrics(validation)
+        return summary, by_sector, by_source
+
+    def build_parameter_plausibility_report(
+        self,
+        selected_params: dict[str, float],
+        model_comparison: pl.DataFrame,
+        validation_summary: pl.DataFrame,
+    ) -> pl.DataFrame:
+        """Flag boundary solutions and weak mechanism evidence."""
+        rows: list[dict[str, Any]] = []
+        for name, value in selected_params.items():
+            lower, upper = self.PARAMETER_BOUNDS[name]
+            width = upper - lower
+            near_lower = value <= lower + 0.05 * width
+            near_upper = value >= upper - 0.05 * width
+            sign_valid = value >= 0 or name == "theta_intercept"
+            notes: list[str] = []
+            if near_lower:
+                notes.append("near lower bound")
+            if near_upper:
+                notes.append("near upper bound")
+            if name == "rho_max":
+                notes.append("annual maximum EI reduction gate")
+            if name == "tau_gap" and near_lower:
+                notes.append("gap closure may be too sensitive")
+            if name == "tau_gap" and near_upper:
+                notes.append("gap closure may be too flat")
+            rows.append(
+                {
+                    "parameter": name,
+                    "value": value,
+                    "lower_bound": lower,
+                    "upper_bound": upper,
+                    "near_lower_bound": near_lower,
+                    "near_upper_bound": near_upper,
+                    "theoretical_sign_valid": sign_valid,
+                    "notes": "; ".join(notes),
+                }
+            )
+        self._append_model_plausibility_rows(rows, model_comparison, validation_summary)
+        return pl.DataFrame(rows)
+
+    def run(self) -> EmissionsCalibrationResult:
+        """Run dataset construction, search, comparisons, and reports."""
+        dataset = self.build_calibration_dataset()
+        search_results = self.run_parameter_search(dataset)
+        selected_params = self.select_best_parameters(search_results)
+        model_comparison = self.evaluate_baseline_models(dataset, selected_params)
+        validation_summary, by_sector, by_source = self.validate_best_parameters(
+            dataset,
+            selected_params,
+        )
+        plausibility = self.build_parameter_plausibility_report(
+            selected_params,
+            model_comparison,
+            validation_summary,
+        )
+        best_json = self._build_best_parameter_json(
+            selected_params,
+            search_results,
+            model_comparison,
+            plausibility,
+            dataset,
+        )
+        markdown = self.build_markdown_report(
+            dataset,
+            validation_summary,
+            model_comparison,
+            by_sector,
+            by_source,
+            plausibility,
+            selected_params,
+        )
+        return EmissionsCalibrationResult(
+            dataset=dataset,
+            search_results=search_results,
+            best_parameters=best_json,
+            validation_summary=validation_summary,
+            by_sector=by_sector,
+            by_capability_source=by_source,
+            model_comparison=model_comparison,
+            parameter_plausibility=plausibility,
+            markdown=markdown,
+        )
+
+    def write_outputs(self, result: EmissionsCalibrationResult) -> None:
+        """Write calibration outputs under data/abm_v4/validation."""
+        self.paths.validation.mkdir(parents=True, exist_ok=True)
+        result.dataset.write_parquet(self.paths.emissions_calibration_dataset_path)
+        result.search_results.write_csv(self.paths.emissions_parameter_search_results_path)
+        self.paths.emissions_best_parameters_path.write_text(
+            json.dumps(result.best_parameters, indent=2),
+            encoding="utf-8",
+        )
+        result.validation_summary.write_csv(self.paths.emissions_calibration_validation_summary_path)
+        result.by_sector.write_csv(self.paths.emissions_calibration_by_sector_path)
+        result.by_capability_source.write_csv(
+            self.paths.emissions_calibration_by_capability_source_path
+        )
+        result.model_comparison.write_csv(self.paths.emissions_model_comparison_path)
+        result.parameter_plausibility.write_csv(self.paths.emissions_parameter_plausibility_path)
+        self.paths.emissions_calibration_report_path.write_text(result.markdown, encoding="utf-8")
+
+    def predict_rEI(
+        self,
+        frame: pl.DataFrame,
+        params: dict[str, float],
+        *,
+        model_name: str,
+    ) -> pl.DataFrame:
+        """Add simulated rEI and prediction errors for one model."""
+        readiness_linear = (
+            pl.lit(params["theta_intercept"])
+            + pl.lit(params["theta_gcap"]) * pl.col("gcap_model").fill_null(0.0)
+            + pl.lit(params["theta_cap"]) * pl.col("cap_model").fill_null(0.0)
+            + pl.lit(params["theta_network_green"]) * pl.col("network_green_exposure").fill_null(0.0)
+            + pl.lit(params["theta_ecosystem_exposure"])
+            * pl.col("ecosystem_capability_exposure").fill_null(0.0)
+            - pl.lit(params["theta_brown_centrality"]) * pl.col("brown_centrality").fill_null(0.0)
+            - pl.lit(params["theta_supplier_lockin"]) * pl.col("supplier_lockin").fill_null(0.0)
+        )
+        no_cap_readiness_linear = (
+            pl.lit(params["theta_intercept"])
+            + pl.lit(params["theta_network_green"]) * pl.col("network_green_exposure").fill_null(0.0)
+            + pl.lit(params["theta_ecosystem_exposure"])
+            * pl.col("ecosystem_capability_exposure").fill_null(0.0)
+            - pl.lit(params["theta_brown_centrality"]) * pl.col("brown_centrality").fill_null(0.0)
+            - pl.lit(params["theta_supplier_lockin"]) * pl.col("supplier_lockin").fill_null(0.0)
+        )
+        gap_fraction = pl.col("ei_gap") / (pl.col("ei_gap") + params["tau_gap"])
+        legacy = (
+            pl.lit(self.config.beta_0)
+            + pl.lit(self.config.beta_log_ei) * pl.col("log_EI").fill_null(0.0)
+            + pl.lit(self.config.beta_green_capability) * pl.col("gcap_model").fill_null(0.0)
+            + pl.lit(self.config.beta_network_green_exposure)
+            * pl.col("network_green_exposure").fill_null(0.0)
+            + pl.lit(self.config.beta_general_capability) * pl.col("cap_model").fill_null(0.0)
+            - pl.lit(self.config.beta_brown_centrality) * pl.col("brown_centrality").fill_null(0.0)
+        )
+        predicted_expr = (
+            pl.when(pl.lit(model_name) == "sector_background_only")
+            .then(pl.col("sector_background_trend"))
+            .when(pl.lit(model_name) == "frontier_gap_only")
+            .then(pl.col("sector_background_trend") + pl.lit(params["rho_max"]) * gap_fraction)
+            .when(pl.lit(model_name) == "readiness_without_capability")
+            .then(
+                pl.col("sector_background_trend")
+                + (
+                    pl.lit(params["rho_max"])
+                    / (pl.lit(1.0) + (-no_cap_readiness_linear).exp())
+                )
+                * gap_fraction
+            )
+            .when(pl.lit(model_name) == "legacy_raw_log")
+            .then(legacy)
+            .otherwise(
+                pl.col("sector_background_trend")
+                + (
+                    pl.lit(params["rho_max"])
+                    / (pl.lit(1.0) + (-readiness_linear).exp())
+                )
+                * gap_fraction
+            )
+        )
+        return frame.with_columns(predicted_expr.alias("simulated_rEI")).with_columns(
+            (pl.col("simulated_rEI") - pl.col("observed_rEI")).alias("rEI_error"),
+            (pl.col("simulated_rEI") - pl.col("observed_rEI")).abs().alias("rEI_abs_error"),
+        )
+
+    def compute_metrics(self, predictions: pl.DataFrame) -> dict[str, float]:
+        """Compute loss and diagnostic metrics."""
+        if predictions.is_empty():
+            return {
+                "mae": float("nan"),
+                "rmse": float("nan"),
+                "median_abs_error": float("nan"),
+                "bias": float("nan"),
+                "wrong_sign_share": float("nan"),
+                "correlation": float("nan"),
+                "sector_weighted_mae": float("nan"),
+                "rows": 0.0,
+            }
+        metrics = predictions.select(
+            pl.col("rEI_abs_error").mean().alias("mae"),
+            (pl.col("rEI_error").pow(2).mean().sqrt()).alias("rmse"),
+            pl.col("rEI_abs_error").median().alias("median_abs_error"),
+            pl.col("rEI_error").mean().alias("bias"),
+            (
+                (
+                    ((pl.col("simulated_rEI") > 0) & (pl.col("observed_rEI") < 0))
+                    | ((pl.col("simulated_rEI") < 0) & (pl.col("observed_rEI") > 0))
+                )
+                .mean()
+            ).alias("wrong_sign_share"),
+            pl.corr("simulated_rEI", "observed_rEI").alias("correlation"),
+            pl.len().alias("rows"),
+        ).to_dicts()[0]
+        sector_mae = (
+            predictions.group_by("Sector")
+            .agg(pl.col("rEI_abs_error").mean().alias("sector_mae"))
+            ["sector_mae"]
+            .mean()
+        )
+        return {
+            "mae": _clean_float(metrics["mae"]),
+            "rmse": _clean_float(metrics["rmse"]),
+            "median_abs_error": _clean_float(metrics["median_abs_error"]),
+            "bias": _clean_float(metrics["bias"]),
+            "wrong_sign_share": _clean_float(metrics["wrong_sign_share"]),
+            "correlation": _clean_float(metrics["correlation"]),
+            "sector_weighted_mae": _clean_float(sector_mae),
+            "rows": float(metrics["rows"]),
+        }
+
+    def build_markdown_report(
+        self,
+        dataset: pl.DataFrame,
+        validation_summary: pl.DataFrame,
+        model_comparison: pl.DataFrame,
+        by_sector: pl.DataFrame,
+        by_source: pl.DataFrame,
+        plausibility: pl.DataFrame,
+        selected_params: dict[str, float],
+    ) -> str:
+        """Render a calibration report with train/validation and baseline comparisons."""
+        validation = validation_summary.filter(pl.col("split") == "validation").to_dicts()[0]
+        lines = [
+            "# ABM v4 Emissions-Transition Calibration Scaffold",
+            "",
+            "This is historically disciplined parameter selection, not structural estimation.",
+            "",
+            "## Sample",
+            "",
+            f"- Calibration rows: {dataset.height}",
+            f"- Train years: {self.start_year}-{self.train_end_year}",
+            f"- Validation years: {self.validation_start_year}-{self.end_year}",
+            "",
+            "## Selected Validation Metrics",
+            "",
+            f"- Validation MAE: {validation['mae']}",
+            f"- Validation bias: {validation['bias']}",
+            f"- Validation wrong-sign share: {validation['wrong_sign_share']}",
+            f"- Validation correlation: {validation['correlation']}",
+            "",
+            "## Best Parameters",
+            "",
+            self._markdown_table(
+                pl.DataFrame([selected_params]).transpose(
+                    include_header=True,
+                    header_name="parameter",
+                    column_names=["value"],
+                )
+            ),
+            "",
+            "## Model Comparison",
+            "",
+            self._markdown_table(model_comparison),
+            "",
+            "## Parameter Plausibility",
+            "",
+            self._markdown_table(plausibility),
+            "",
+            "## Error by Sector",
+            "",
+            self._markdown_table(by_sector.head(10)),
+            "",
+            "## Error by Capability Source",
+            "",
+            self._markdown_table(by_source),
+            "",
+            "## Interpretation",
+            "",
+            "Use these parameters as candidates for a calibrated historical run only after checking "
+            "whether the full frontier-gap readiness model materially improves over the baselines. "
+            "Do not treat them as causal estimates or scenario policy parameters.",
+        ]
+        return "\n".join(lines) + "\n"
+
+    def _prepare_state_features(self, state: pl.DataFrame) -> pl.DataFrame:
+        cap_expr = (
+            pl.col("general_capability_model")
+            if "general_capability_model" in state.columns
+            else pl.col("general_capability")
+        )
+        gcap_expr = (
+            pl.col("green_capability_model")
+            if "green_capability_model" in state.columns
+            else pl.col("green_capability")
+        )
+        network_expr = (
+            pl.col("network_green_exposure")
+            if "network_green_exposure" in state.columns
+            else pl.col("g_local_v4")
+            if "g_local_v4" in state.columns
+            else pl.lit(0.0)
+        )
+        brown_expr = (
+            pl.col("brown_centrality") if "brown_centrality" in state.columns else pl.lit(0.0)
+        )
+        selected = state.select(
+            "country_sector",
+            pl.col("Year").alias("year"),
+            "Country",
+            "Sector",
+            (
+                pl.col("ecosystem_id")
+                if "ecosystem_id" in state.columns
+                else pl.lit("missing")
+            ).alias("ecosystem_id"),
+            "EI",
+            pl.when(pl.col("EI") > 0).then(pl.col("EI").log()).otherwise(None).alias("log_EI"),
+            cap_expr.cast(pl.Float64).alias("cap_model"),
+            gcap_expr.cast(pl.Float64).alias("gcap_model"),
+            (
+                pl.col("general_capability_source")
+                if "general_capability_source" in state.columns
+                else pl.lit("unavailable")
+            ).alias("general_capability_source"),
+            (
+                pl.col("green_capability_source")
+                if "green_capability_source" in state.columns
+                else pl.lit("unavailable")
+            ).alias("green_capability_source"),
+            network_expr.cast(pl.Float64).alias("network_green_exposure"),
+            brown_expr.cast(pl.Float64).fill_null(0.0).alias("brown_centrality"),
+        )
+        ecosystem_exposure = selected.group_by(["year", "ecosystem_id"]).agg(
+            pl.col("cap_model").mean().alias("ecosystem_capability_exposure")
+        )
+        return selected.join(ecosystem_exposure, on=["year", "ecosystem_id"], how="left")
+
+    def _add_sector_frontiers(self, frame: pl.DataFrame) -> pl.DataFrame:
+        valid = frame.filter(pl.col("EI") > 0)
+        global_frontiers = valid.group_by("year").agg(
+            pl.col("EI").quantile(self.config.ei_frontier_quantile).alias("global_EI_frontier")
+        )
+        sector_frontiers = (
+            valid.group_by(["year", "Sector"])
+            .agg(
+                pl.len().alias("valid_frontier_nodes"),
+                pl.col("EI").quantile(self.config.ei_frontier_quantile).alias("sector_EI_frontier"),
+            )
+            .join(global_frontiers, on="year", how="left")
+            .with_columns(
+                pl.when(pl.col("valid_frontier_nodes") < self.config.min_frontier_nodes)
+                .then(pl.col("global_EI_frontier"))
+                .otherwise(pl.col("sector_EI_frontier"))
+                .alias("EI_frontier")
+            )
+            .select("year", "Sector", "EI_frontier")
+        )
+        return frame.join(sector_frontiers, on=["year", "Sector"], how="left").with_columns(
+            pl.when((pl.col("EI") > 0) & (pl.col("EI_frontier") > 0))
+            .then((pl.col("EI").log() - pl.col("EI_frontier").log()).clip(0.0, None))
+            .otherwise(None)
+            .alias("ei_gap")
+        )
+
+    def _add_sector_background_trend(self, frame: pl.DataFrame) -> pl.DataFrame:
+        observed = (
+            frame.sort(["country_sector", "year"])
+            .with_columns(
+                pl.col("year").shift(-1).over("country_sector").alias("_next_year"),
+                pl.col("EI").shift(-1).over("country_sector").alias("_next_EI"),
+            )
+            .filter(
+                (pl.col("_next_year") == pl.col("year") + 1)
+                & (pl.col("year") <= self.train_end_year)
+                & (pl.col("EI") > 0)
+                & (pl.col("_next_EI") > 0)
+            )
+            .with_columns((pl.col("EI").log() - pl.col("_next_EI").log()).alias("_observed_rEI"))
+        )
+        global_median = observed["_observed_rEI"].median()
+        fallback = self.config.sector_background_fallback if global_median is None else float(global_median)
+        background = (
+            observed.group_by("Sector")
+            .agg(
+                pl.len().alias("_background_observations"),
+                pl.col("_observed_rEI").median().clip(-0.03, 0.05).alias("sector_background_trend"),
+            )
+            .with_columns(
+                pl.when(pl.col("_background_observations") < self.config.min_frontier_nodes)
+                .then(pl.lit(fallback))
+                .otherwise(pl.col("sector_background_trend"))
+                .alias("sector_background_trend")
+            )
+            .select("Sector", "sector_background_trend")
+        )
+        return frame.join(background, on="Sector", how="left").with_columns(
+            pl.col("sector_background_trend").fill_null(fallback)
+        )
+
+    def _add_supplier_lockin(self, frame: pl.DataFrame) -> pl.DataFrame:
+        weights = self.load_supplier_weights()
+        if weights is None or weights.is_empty():
+            return frame.with_columns(pl.lit(0.0).alias("supplier_lockin"))
+        lockin = (
+            weights.group_by("buyer_country_sector")
+            .agg((pl.col("updated_weight") ** 2).sum().alias("supplier_lockin"))
+            .rename({"buyer_country_sector": "country_sector"})
+            .with_columns(pl.col("supplier_lockin").clip(0.0, 1.0))
+        )
+        return frame.join(lockin, on="country_sector", how="left").with_columns(
+            pl.col("supplier_lockin").fill_null(0.0)
+        )
+
+    def _default_parameter_set(self) -> dict[str, float]:
+        return {
+            "rho_max": self.config.rho_max,
+            "theta_intercept": self.config.theta_intercept,
+            "theta_gcap": self.config.theta_gcap,
+            "theta_cap": self.config.theta_cap,
+            "theta_network_green": self.config.theta_network_green,
+            "theta_ecosystem_exposure": self.config.theta_ecosystem_exposure,
+            "theta_brown_centrality": self.config.theta_brown_centrality,
+            "theta_supplier_lockin": self.config.theta_supplier_lockin,
+            "tau_gap": self.config.tau_gap,
+        }
+
+    def _prefix_metrics(self, metrics: dict[str, float], prefix: str) -> dict[str, float]:
+        return {f"{prefix}_{name}": value for name, value in metrics.items()}
+
+    def _group_prediction_metrics(self, frame: pl.DataFrame, groups: list[str]) -> pl.DataFrame:
+        if frame.is_empty():
+            return pl.DataFrame()
+        return frame.group_by(groups).agg(
+            pl.len().alias("rows"),
+            pl.col("rEI_abs_error").mean().alias("mae"),
+            (pl.col("rEI_error").pow(2).mean().sqrt()).alias("rmse"),
+            pl.col("rEI_error").mean().alias("bias"),
+            (
+                (
+                    ((pl.col("simulated_rEI") > 0) & (pl.col("observed_rEI") < 0))
+                    | ((pl.col("simulated_rEI") < 0) & (pl.col("observed_rEI") > 0))
+                ).mean()
+            ).alias("wrong_sign_share"),
+        )
+
+    def _capability_source_prediction_metrics(self, frame: pl.DataFrame) -> pl.DataFrame:
+        frames: list[pl.DataFrame] = []
+        for column in ("general_capability_source", "green_capability_source"):
+            if column not in frame.columns:
+                continue
+            summary = self._group_prediction_metrics(frame, [column]).rename(
+                {column: "capability_source"}
+            )
+            frames.append(summary.with_columns(pl.lit(column).alias("capability_source_type")))
+        return pl.concat(frames, how="diagonal") if frames else pl.DataFrame()
+
+    def _append_model_plausibility_rows(
+        self,
+        rows: list[dict[str, Any]],
+        model_comparison: pl.DataFrame,
+        validation_summary: pl.DataFrame,
+    ) -> None:
+        full = model_comparison.filter(pl.col("model_name") == "frontier_gap_readiness")
+        background = model_comparison.filter(pl.col("model_name") == "sector_background_only")
+        no_cap = model_comparison.filter(pl.col("model_name") == "readiness_without_capability")
+        if not full.is_empty() and not background.is_empty():
+            improvement = background["validation_mae"].item() - full["validation_mae"].item()
+            rows.append(
+                {
+                    "parameter": "model_improvement_vs_background",
+                    "value": improvement,
+                    "lower_bound": None,
+                    "upper_bound": None,
+                    "near_lower_bound": False,
+                    "near_upper_bound": False,
+                    "theoretical_sign_valid": True,
+                    "notes": "weak mechanism validation" if improvement < 0.001 else "meaningful baseline improvement",
+                }
+            )
+        if not full.is_empty() and not no_cap.is_empty():
+            contribution = no_cap["validation_mae"].item() - full["validation_mae"].item()
+            rows.append(
+                {
+                    "parameter": "capability_contribution",
+                    "value": contribution,
+                    "lower_bound": None,
+                    "upper_bound": None,
+                    "near_lower_bound": False,
+                    "near_upper_bound": False,
+                    "theoretical_sign_valid": True,
+                    "notes": "capability terms weak" if contribution < 0.001 else "capability terms improve validation fit",
+                }
+            )
+        validation = validation_summary.filter(pl.col("split") == "validation")
+        if not validation.is_empty():
+            rows.append(
+                {
+                    "parameter": "universal_positive_rEI_check",
+                    "value": 1.0 - float(validation["wrong_sign_share"].item()),
+                    "lower_bound": 0.0,
+                    "upper_bound": 1.0,
+                    "near_lower_bound": False,
+                    "near_upper_bound": False,
+                    "theoretical_sign_valid": True,
+                    "notes": "review sign distribution; this is not a universal decarbonization proof",
+                }
+            )
+
+    def _build_best_parameter_json(
+        self,
+        selected_params: dict[str, float],
+        search_results: pl.DataFrame,
+        model_comparison: pl.DataFrame,
+        plausibility: pl.DataFrame,
+        dataset: pl.DataFrame,
+    ) -> dict[str, Any]:
+        selected = search_results.filter(pl.col("selected")).to_dicts()[0]
+        return {
+            "selected_parameters": selected_params,
+            "train_metrics": {
+                key.removeprefix("train_"): selected[key]
+                for key in selected
+                if key.startswith("train_")
+            },
+            "validation_metrics": {
+                key.removeprefix("validation_"): selected[key]
+                for key in selected
+                if key.startswith("validation_")
+            },
+            "baseline_comparison_summary": model_comparison.to_dicts(),
+            "plausibility_flags": plausibility.to_dicts(),
+            "run_metadata": {
+                "start_year": self.start_year,
+                "end_year": self.end_year,
+                "train_end_year": self.train_end_year,
+                "validation_start_year": self.validation_start_year,
+                "random_search_iterations": self.random_search_iterations,
+                "seed": self.seed,
+                "calibration_rows": dataset.height,
+            },
+            "note": (
+                "These are historically disciplined base parameters, not structural estimates "
+                "and not scenario policy parameters. config.py is not overwritten."
+            ),
+        }
+
+    def _markdown_table(self, frame: pl.DataFrame) -> str:
+        if frame.is_empty():
+            return "_No rows available._"
+        columns = frame.columns
+        lines = [
+            "| " + " | ".join(columns) + " |",
+            "| " + " | ".join("---" for _ in columns) + " |",
+        ]
+        for row in frame.to_dicts():
+            lines.append(
+                "| "
+                + " | ".join(self._format_markdown_value(row.get(column)) for column in columns)
+                + " |"
+            )
+        return "\n".join(lines)
+
+    def _format_markdown_value(self, value: Any) -> str:
+        if isinstance(value, float):
+            return f"{value:.6g}"
+        if value is None:
+            return ""
+        return str(value).replace("|", "/")
+
+
+def _clean_float(value: Any) -> float:
+    """Convert numeric values to plain floats, preserving missingness as NaN."""
+    if value is None:
+        return float("nan")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float("nan")

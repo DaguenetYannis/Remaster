@@ -46,6 +46,470 @@ class OneStepBaseValidationResult:
         return bool(self.status["overall_passed"])
 
 
+@dataclass(frozen=True)
+class MultiYearHistoricalValidationResult:
+    """Detailed historical validation outputs for a multi-year base run."""
+
+    error_panel: pl.DataFrame
+    error_summary: pl.DataFrame
+    error_by_sector: pl.DataFrame
+    error_by_country: pl.DataFrame
+    error_by_ecosystem: pl.DataFrame
+    error_by_capability_source: pl.DataFrame
+    calibration_targets: pl.DataFrame
+    markdown: str
+
+
+class MultiYearHistoricalValidator:
+    """Build calibration diagnostics from an existing ABM v4 multi-year run."""
+
+    def __init__(self, paths: ABMV4Paths, config: ABMV4Config) -> None:
+        self.paths = paths
+        self.config = config
+
+    def load_simulation_panel(self) -> pl.DataFrame:
+        """Load the existing multi-year simulation state panel."""
+        if not self.paths.base_multiyear_state_panel_path.exists():
+            raise FileNotFoundError(
+                "Missing multi-year simulation output: "
+                f"{self.paths.base_multiyear_state_panel_path}. Run "
+                "`python scripts/run_abm_v4_base.py --run-multiyear-base "
+                "--start-year 1995 --end-year 2016 --create-output-dirs --reuse-existing` first."
+            )
+        return pl.read_parquet(self.paths.base_multiyear_state_panel_path)
+
+    def load_summary_panel(self) -> pl.DataFrame:
+        """Load the existing multi-year summary panel when present."""
+        if not self.paths.base_multiyear_summary_panel_path.exists():
+            return pl.DataFrame()
+        return pl.read_csv(self.paths.base_multiyear_summary_panel_path)
+
+    def build(self) -> MultiYearHistoricalValidationResult:
+        """Build all multi-year historical validation artifacts in memory."""
+        simulation = self.load_simulation_panel()
+        summary = self.load_summary_panel()
+        error_panel = self.build_error_panel(simulation)
+        error_summary = self.build_error_summary(error_panel)
+        error_by_sector = self.build_grouped_error_summary(error_panel, "Sector")
+        error_by_country = self.build_grouped_error_summary(error_panel, "Country")
+        error_by_ecosystem = self.build_grouped_error_summary(error_panel, "ecosystem_label")
+        error_by_capability_source = self.build_capability_source_summary(error_panel)
+        calibration_targets = self.build_calibration_targets(error_panel)
+        markdown = self.build_markdown_report(
+            error_panel=error_panel,
+            error_summary=error_summary,
+            error_by_sector=error_by_sector,
+            error_by_country=error_by_country,
+            error_by_ecosystem=error_by_ecosystem,
+            error_by_capability_source=error_by_capability_source,
+            calibration_targets=calibration_targets,
+            summary_panel=summary,
+        )
+        return MultiYearHistoricalValidationResult(
+            error_panel=error_panel,
+            error_summary=error_summary,
+            error_by_sector=error_by_sector,
+            error_by_country=error_by_country,
+            error_by_ecosystem=error_by_ecosystem,
+            error_by_capability_source=error_by_capability_source,
+            calibration_targets=calibration_targets,
+            markdown=markdown,
+        )
+
+    def build_error_panel(self, simulation: pl.DataFrame) -> pl.DataFrame:
+        """Compute node-year EI, emissions, and transition errors."""
+        required = {
+            "country_sector",
+            "year",
+            "Country",
+            "Sector",
+            "EI_sim",
+            "EI_observed",
+            "emissions_sim",
+            "emissions_observed",
+        }
+        missing = sorted(required - set(simulation.columns))
+        if missing:
+            raise ValueError(f"Missing required multi-year simulation columns: {', '.join(missing)}")
+
+        panel = simulation.sort(["country_sector", "year"]).with_columns(
+            (pl.col("EI_sim") - pl.col("EI_observed")).alias("EI_error"),
+            (pl.col("EI_sim") - pl.col("EI_observed")).abs().alias("EI_abs_error"),
+            pl.when(pl.col("EI_observed").is_not_null() & (pl.col("EI_observed") != 0))
+            .then((pl.col("EI_sim") - pl.col("EI_observed")) / pl.col("EI_observed"))
+            .otherwise(None)
+            .alias("EI_pct_error"),
+            pl.when((pl.col("EI_sim") > 0) & (pl.col("EI_observed") > 0))
+            .then(pl.col("EI_sim").log() - pl.col("EI_observed").log())
+            .otherwise(None)
+            .alias("log_EI_error"),
+            (pl.col("emissions_sim") - pl.col("emissions_observed")).alias("emissions_error"),
+            (pl.col("emissions_sim") - pl.col("emissions_observed")).abs().alias("emissions_abs_error"),
+            pl.when(pl.col("emissions_observed").is_not_null() & (pl.col("emissions_observed") != 0))
+            .then((pl.col("emissions_sim") - pl.col("emissions_observed")) / pl.col("emissions_observed"))
+            .otherwise(None)
+            .alias("emissions_pct_error"),
+            pl.col("EI_observed").shift(-1).over("country_sector").alias("_EI_observed_next"),
+            pl.col("EI_sim").shift(-1).over("country_sector").alias("_EI_sim_next"),
+            pl.col("year").shift(-1).over("country_sector").alias("_year_next"),
+        )
+        panel = panel.with_columns(
+            pl.when(
+                (pl.col("_year_next") == pl.col("year") + 1)
+                & (pl.col("EI_observed") > 0)
+                & (pl.col("_EI_observed_next") > 0)
+            )
+            .then(pl.col("EI_observed").log() - pl.col("_EI_observed_next").log())
+            .otherwise(None)
+            .alias("observed_rEI"),
+            pl.when(
+                (pl.col("_year_next") == pl.col("year") + 1)
+                & (pl.col("EI_sim") > 0)
+                & (pl.col("_EI_sim_next") > 0)
+            )
+            .then(pl.col("EI_sim").log() - pl.col("_EI_sim_next").log())
+            .otherwise(None)
+            .alias("simulated_rEI"),
+        ).with_columns(
+            (pl.col("simulated_rEI") - pl.col("observed_rEI")).alias("rEI_error"),
+            (pl.col("simulated_rEI") - pl.col("observed_rEI")).abs().alias("rEI_abs_error"),
+        )
+        panel = self._add_quartile_columns(panel)
+        return panel.drop(["_EI_observed_next", "_EI_sim_next", "_year_next"])
+
+    def build_error_summary(self, error_panel: pl.DataFrame) -> pl.DataFrame:
+        """Build aggregate yearly error diagnostics."""
+        return (
+            error_panel.group_by("year")
+            .agg(
+                pl.col("emissions_observed").sum().alias("total_emissions_observed"),
+                pl.col("emissions_sim").sum().alias("total_emissions_sim"),
+                pl.col("EI_observed").mean().alias("mean_EI_observed"),
+                pl.col("EI_sim").mean().alias("mean_EI_sim"),
+                pl.col("EI_observed").median().alias("median_EI_observed"),
+                pl.col("EI_sim").median().alias("median_EI_sim"),
+                pl.col("observed_rEI").mean().alias("mean_rEI_observed"),
+                pl.col("simulated_rEI").mean().alias("mean_rEI_sim"),
+                pl.col("EI_abs_error").mean().alias("mean_EI_abs_error"),
+                pl.col("log_EI_error").mean().alias("mean_log_EI_error"),
+                pl.col("emissions_abs_error").mean().alias("mean_emissions_abs_error"),
+                pl.col("rEI_abs_error").mean().alias("mean_rEI_abs_error"),
+            )
+            .with_columns(
+                (pl.col("total_emissions_sim") - pl.col("total_emissions_observed")).alias(
+                    "aggregate_emissions_error"
+                ),
+                pl.when(pl.col("total_emissions_observed") != 0)
+                .then(
+                    (pl.col("total_emissions_sim") - pl.col("total_emissions_observed"))
+                    / pl.col("total_emissions_observed")
+                )
+                .otherwise(None)
+                .alias("aggregate_emissions_pct_error"),
+            )
+            .sort("year")
+        )
+
+    def build_grouped_error_summary(self, error_panel: pl.DataFrame, group_column: str) -> pl.DataFrame:
+        """Summarize validation errors by one grouping column."""
+        if group_column not in error_panel.columns:
+            return pl.DataFrame()
+        return self._summarize_groups(error_panel, [group_column]).sort(
+            "mean_emissions_abs_error", descending=True
+        )
+
+    def build_capability_source_summary(self, error_panel: pl.DataFrame) -> pl.DataFrame:
+        """Summarize errors by general and green capability source."""
+        frames: list[pl.DataFrame] = []
+        for column in ("general_capability_source", "green_capability_source"):
+            if column not in error_panel.columns:
+                continue
+            summary = self._summarize_groups(error_panel, [column]).rename({column: "capability_source"})
+            summary = summary.with_columns(pl.lit(column).alias("capability_source_type"))
+            frames.append(summary)
+        return pl.concat(frames, how="diagonal") if frames else pl.DataFrame()
+
+    def build_calibration_targets(self, error_panel: pl.DataFrame) -> pl.DataFrame:
+        """Identify sector-level rEI calibration targets without changing parameters."""
+        targets = (
+            error_panel.group_by("Sector")
+            .agg(
+                pl.len().alias("rows"),
+                pl.col("observed_rEI").count().alias("valid_rEI_rows"),
+                pl.col("observed_rEI").mean().alias("mean_observed_rEI"),
+                pl.col("observed_rEI").median().alias("median_observed_rEI"),
+                pl.col("simulated_rEI").mean().alias("mean_simulated_rEI"),
+                pl.col("simulated_rEI").median().alias("median_simulated_rEI"),
+                pl.col("observed_rEI").quantile(0.25).alias("observed_rEI_p25"),
+                pl.col("observed_rEI").quantile(0.50).alias("observed_rEI_p50"),
+                pl.col("observed_rEI").quantile(0.75).alias("observed_rEI_p75"),
+                pl.col("simulated_rEI").quantile(0.25).alias("simulated_rEI_p25"),
+                pl.col("simulated_rEI").quantile(0.50).alias("simulated_rEI_p50"),
+                pl.col("simulated_rEI").quantile(0.75).alias("simulated_rEI_p75"),
+                pl.col("rEI_error").mean().alias("rEI_bias_by_sector"),
+                pl.col("rEI_abs_error").mean().alias("mean_rEI_abs_error"),
+                pl.col("invalid_EI_flag").mean().alias("invalid_EI_share")
+                if "invalid_EI_flag" in error_panel.columns
+                else pl.lit(None).alias("invalid_EI_share"),
+                pl.col("capability_model_unavailable_flag").mean().alias("capability_unavailable_share")
+                if "capability_model_unavailable_flag" in error_panel.columns
+                else pl.lit(None).alias("capability_unavailable_share"),
+                pl.col("ei_gap").mean().alias("mean_ei_gap")
+                if "ei_gap" in error_panel.columns
+                else pl.lit(None).alias("mean_ei_gap"),
+            )
+            .with_columns(
+                pl.when(pl.col("invalid_EI_share") > 0.2)
+                .then(pl.lit("inspect invalid EI"))
+                .when(pl.col("capability_unavailable_share") > 0.25)
+                .then(pl.lit("inspect capability source"))
+                .when(pl.col("rEI_bias_by_sector") > 0.01)
+                .then(pl.lit("decrease readiness"))
+                .when(pl.col("rEI_bias_by_sector") < -0.01)
+                .then(pl.lit("increase readiness"))
+                .when(pl.col("mean_ei_gap").fill_null(0) <= 0)
+                .then(pl.lit("inspect frontier gap"))
+                .otherwise(pl.lit("adjust background trend"))
+                .alias("suggested_direction")
+            )
+            .sort("mean_rEI_abs_error", descending=True)
+        )
+        return targets
+
+    def build_markdown_report(
+        self,
+        *,
+        error_panel: pl.DataFrame,
+        error_summary: pl.DataFrame,
+        error_by_sector: pl.DataFrame,
+        error_by_country: pl.DataFrame,
+        error_by_ecosystem: pl.DataFrame,
+        error_by_capability_source: pl.DataFrame,
+        calibration_targets: pl.DataFrame,
+        summary_panel: pl.DataFrame,
+    ) -> str:
+        """Render a human-readable historical validation and calibration report."""
+        latest = error_summary.sort("year").tail(1).to_dicts()[0] if not error_summary.is_empty() else {}
+        aggregate_pct_error = _as_float(latest.get("aggregate_emissions_pct_error"))
+        identity_error = (
+            _as_float(summary_panel["emissions_identity_max_error"].max())
+            if not summary_panel.is_empty() and "emissions_identity_max_error" in summary_panel.columns
+            else 0.0
+        )
+        dynamic_valid = identity_error < 1e-8
+        historically_calibrated = abs(aggregate_pct_error) < 0.25
+        cap_source_rows = error_by_capability_source.to_dicts()
+        io_rows = [
+            row
+            for row in cap_source_rows
+            if str(row.get("capability_source", "")).lower() == "io_imputed"
+        ]
+        io_note = (
+            "IO-imputed capability does not stand out as unavailable, but it should remain a calibration slice."
+            if io_rows
+            else "No IO-imputed capability source rows were available in this validation output."
+        )
+        if io_rows:
+            io_log_errors = [
+                _as_float(row.get("mean_log_EI_error"))
+                for row in io_rows
+                if row.get("mean_log_EI_error") is not None
+            ]
+            if io_log_errors and max(abs(value) for value in io_log_errors) > 0.5:
+                io_note = "IO-imputed capability appears associated with large EI errors and should be inspected."
+
+        lines = [
+            "# ABM v4 Multi-Year Historical Validation",
+            "",
+            "## Executive Summary",
+            "",
+            f"- Dynamic validity: {'pass' if dynamic_valid else 'fail'}",
+            f"- Historically calibrated: {'yes' if historically_calibrated else 'no'}",
+            f"- Latest aggregate emissions pct error: {aggregate_pct_error}",
+            f"- Max emissions identity error: {identity_error}",
+            "- Production remains historically forced.",
+            "",
+            "## Aggregate Emissions Fit",
+            "",
+            self._markdown_table(
+                error_summary.select(
+                    [
+                        "year",
+                        "total_emissions_observed",
+                        "total_emissions_sim",
+                        "aggregate_emissions_pct_error",
+                    ]
+                ).tail(5)
+            ),
+            "",
+            "## EI Fit",
+            "",
+            self._markdown_table(
+                error_summary.select(
+                    ["year", "mean_EI_observed", "mean_EI_sim", "median_EI_observed", "median_EI_sim"]
+                ).tail(5)
+            ),
+            "",
+            "## rEI Transition Fit",
+            "",
+            self._markdown_table(
+                error_summary.select(["year", "mean_rEI_observed", "mean_rEI_sim", "mean_rEI_abs_error"]).tail(5)
+            ),
+            "",
+            "## Largest Error Sectors",
+            "",
+            self._markdown_table(error_by_sector.head(10)),
+            "",
+            "## Largest Error Countries",
+            "",
+            self._markdown_table(error_by_country.head(10)),
+            "",
+            "## Error by Capability Source",
+            "",
+            self._markdown_table(error_by_capability_source),
+            "",
+            "## Error by Ecosystem",
+            "",
+            self._markdown_table(error_by_ecosystem.head(10)),
+            "",
+            "## Error by Initial EI Quartile",
+            "",
+            self._markdown_table(self._summarize_groups(error_panel, ["initial_EI_quartile"])),
+            "",
+            "## Error by Brown Centrality Quartile",
+            "",
+            self._markdown_table(self._summarize_groups(error_panel, ["brown_centrality_quartile"])),
+            "",
+            "## Error by Readiness Quartile",
+            "",
+            self._markdown_table(self._summarize_groups(error_panel, ["readiness_quartile"])),
+            "",
+            "## Error by Frontier Gap Quartile",
+            "",
+            self._markdown_table(self._summarize_groups(error_panel, ["frontier_gap_quartile"])),
+            "",
+            "## IO-Imputed Capability Assessment",
+            "",
+            io_note,
+            "",
+            "## Frontier-Gap Readiness Assessment",
+            "",
+            "Use the sector-level rEI bias table to distinguish over-greening from under-greening. "
+            "Positive rEI bias indicates simulated EI reduction is too fast; negative bias indicates it is too slow.",
+            "",
+            "## Recommended Calibration Priorities",
+            "",
+            self._markdown_table(
+                calibration_targets.select(
+                    [
+                        "Sector",
+                        "mean_observed_rEI",
+                        "mean_simulated_rEI",
+                        "rEI_bias_by_sector",
+                        "mean_rEI_abs_error",
+                        "suggested_direction",
+                    ]
+                ).head(10)
+            ),
+            "",
+            "## Caveat",
+            "",
+            "Production is historically forced in this Phase 11 validation. The run can be dynamically coherent "
+            "while still not historically calibrated enough for scenarios.",
+        ]
+        return "\n".join(lines) + "\n"
+
+    def write_outputs(self, result: MultiYearHistoricalValidationResult) -> None:
+        """Write multi-year validation artifacts under data/abm_v4/validation."""
+        self.paths.validation.mkdir(parents=True, exist_ok=True)
+        result.error_panel.write_parquet(self.paths.multiyear_error_panel_path)
+        result.error_summary.write_csv(self.paths.multiyear_error_summary_path)
+        result.error_by_sector.write_csv(self.paths.multiyear_error_by_sector_path)
+        result.error_by_country.write_csv(self.paths.multiyear_error_by_country_path)
+        result.error_by_ecosystem.write_csv(self.paths.multiyear_error_by_ecosystem_path)
+        result.error_by_capability_source.write_csv(self.paths.multiyear_error_by_capability_source_path)
+        result.calibration_targets.write_csv(self.paths.multiyear_calibration_targets_path)
+        self.paths.multiyear_validation_report_md_path.write_text(result.markdown, encoding="utf-8")
+
+    def _summarize_groups(self, error_panel: pl.DataFrame, group_columns: list[str]) -> pl.DataFrame:
+        return (
+            error_panel.group_by(group_columns)
+            .agg(
+                pl.len().alias("rows"),
+                pl.col("EI_abs_error").mean().alias("mean_EI_abs_error"),
+                pl.col("EI_abs_error").median().alias("median_EI_abs_error"),
+                pl.col("log_EI_error").mean().alias("mean_log_EI_error"),
+                pl.col("emissions_abs_error").mean().alias("mean_emissions_abs_error"),
+                pl.col("emissions_error").sum().alias("total_emissions_error"),
+                pl.col("rEI_error").mean().alias("mean_rEI_error"),
+                pl.col("rEI_abs_error").mean().alias("mean_rEI_abs_error"),
+            )
+            .with_columns(
+                pl.col(group_columns[0]).cast(pl.Utf8).fill_null("missing").alias(group_columns[0])
+            )
+        )
+
+    def _add_quartile_columns(self, panel: pl.DataFrame) -> pl.DataFrame:
+        first_year = panel["year"].min()
+        initial = (
+            panel.filter(pl.col("year") == first_year)
+            .select("country_sector", pl.col("EI_observed").alias("_initial_EI_observed"))
+        )
+        panel = panel.join(initial, on="country_sector", how="left")
+        quartile_specs = {
+            "_initial_EI_observed": "initial_EI_quartile",
+            "brown_centrality": "brown_centrality_quartile",
+            "readiness": "readiness_quartile",
+            "ei_gap": "frontier_gap_quartile",
+        }
+        for source, target in quartile_specs.items():
+            panel = self._add_quartile_column(panel, source, target)
+        return panel.drop("_initial_EI_observed")
+
+    def _add_quartile_column(self, panel: pl.DataFrame, source: str, target: str) -> pl.DataFrame:
+        if source not in panel.columns:
+            return panel.with_columns(pl.lit("missing").alias(target))
+        valid = panel.filter(pl.col(source).is_not_null())
+        if valid.is_empty():
+            return panel.with_columns(pl.lit("missing").alias(target))
+        q25 = valid[source].quantile(0.25)
+        q50 = valid[source].quantile(0.50)
+        q75 = valid[source].quantile(0.75)
+        return panel.with_columns(
+            pl.when(pl.col(source).is_null())
+            .then(pl.lit("missing"))
+            .when(pl.col(source) <= q25)
+            .then(pl.lit("q1"))
+            .when(pl.col(source) <= q50)
+            .then(pl.lit("q2"))
+            .when(pl.col(source) <= q75)
+            .then(pl.lit("q3"))
+            .otherwise(pl.lit("q4"))
+            .alias(target)
+        )
+
+    def _markdown_table(self, frame: pl.DataFrame) -> str:
+        if frame.is_empty():
+            return "_No rows available._"
+        rows = frame.to_dicts()
+        columns = frame.columns
+        lines = [
+            "| " + " | ".join(columns) + " |",
+            "| " + " | ".join("---" for _ in columns) + " |",
+        ]
+        for row in rows:
+            values = [self._format_markdown_value(row.get(column)) for column in columns]
+            lines.append("| " + " | ".join(values) + " |")
+        return "\n".join(lines)
+
+    def _format_markdown_value(self, value: Any) -> str:
+        if isinstance(value, float):
+            return f"{value:.6g}"
+        if value is None:
+            return ""
+        return str(value).replace("|", "/")
+
+
 def required_one_step_component_paths(
     paths: ABMV4Paths,
     config: ABMV4Config,
