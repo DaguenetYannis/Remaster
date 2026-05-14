@@ -137,6 +137,14 @@ class ABMV4Paths:
         return self.interim / "supplier_updated_weights.parquet"
 
     @property
+    def capability_exposure_panel_path(self) -> Path:
+        return self.interim / "capability_exposure_panel.parquet"
+
+    @property
+    def capability_update_panel_path(self) -> Path:
+        return self.interim / "capability_update_panel.parquet"
+
+    @property
     def supplier_edge_report_path(self) -> Path:
         return self.diagnostics / "supplier_edge_report.csv"
 
@@ -159,6 +167,10 @@ class ABMV4Paths:
     @property
     def supplier_rewiring_report_path(self) -> Path:
         return self.diagnostics / "supplier_rewiring_report.csv"
+
+    @property
+    def capability_update_report_path(self) -> Path:
+        return self.diagnostics / "capability_update_report.csv"
 
     @property
     def supplier_edge_schema_report_path(self) -> Path:

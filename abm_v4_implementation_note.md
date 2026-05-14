@@ -376,6 +376,67 @@ Caveat:
 
 - This is a one-step baseline supplier-weight update layer. It is not the full dynamic simulation, does not propagate production, does not simulate emissions, and does not implement scenarios.
 
+## Phase 5 Capability Accumulation Layer
+
+ABM v4 now builds a one-step general and green capability update using the latest state panel year and updated supplier weights. This phase creates capability exposures, capability deltas, updated capability stocks, and diagnostics. It does not run production, emissions, or scenario simulation.
+
+Inputs:
+
+```text
+data/abm_v4/inputs/abm_v4_state_panel_1995_2016.parquet
+data/abm_v4/interim/supplier_updated_weights.parquet
+```
+
+Generated outputs:
+
+```text
+data/abm_v4/interim/capability_exposure_panel.parquet
+data/abm_v4/interim/capability_update_panel.parquet
+data/abm_v4/diagnostics/capability_update_report.csv
+```
+
+Real-data capability update summary:
+
+- Selected year: 2016
+- Node count: 4,915
+- Mean general capability stock: 0.6908553253705668
+- Mean green capability stock: 0.0610879717557677
+- Mean general capability exposure: 0.6676063336392002
+- Mean green capability exposure: 0.18712781831913547
+- Mean general capability delta: 0.010585083349278736
+- Mean green capability delta: 0.007929139430966488
+- Maximum general capability delta: 0.02781412519241035
+- Maximum green capability delta: 0.020303023767912022
+
+Missingness and fill handling:
+
+- Share of nodes with general capability filled from within-year median: 0.40508646998982706
+- Share of nodes with green capability filled from within-year median: 0.40508646998982706
+- Missing capability stocks are not silently set to zero; fill flags are written in `capability_update_panel.parquet`.
+
+Supplier exposure coverage:
+
+- Mean supplier capability coverage: 1.0
+- Mean supplier green coverage: 1.0
+
+Bounds:
+
+- General capability clipped count: 0
+- Green capability clipped count: 0
+- `cap_next >= cap` and `gcap_next >= gcap` for all nodes.
+- `cap_next <= 1` and `gcap_next <= 1` for all nodes.
+
+Method:
+
+- General capability exposure combines normalized production experience, supplier-weighted general capability, and same-ecosystem mean capability.
+- Green capability exposure combines green production experience, supplier-weighted `g_local_v4`, and supplier-weighted green capability.
+- Supplier-weighted exposures use `supplier_updated_weights.parquet`, exclude missing supplier values, and renormalize covered supplier weights.
+- Capability accumulation uses a sigmoid adoption signal and saturates near configured maxima.
+
+Caveat:
+
+- This is a one-step capability update, not the full dynamic simulation. ABM v4 still has only general and green capability stocks; ecosystem-specific capability stocks remain a v5 extension.
+
 ## Extension from ABM v3
 
 ABM v4 introduces a separate namespace and output root. It can inspect ABM v3 outputs as preferred inputs, but writes only under `data/abm_v4/` when explicitly run.
@@ -440,6 +501,12 @@ Build one-step supplier rewiring flags and supplier-weight updates:
 
 ```powershell
 python scripts/run_abm_v4_base.py --build-supplier-rewiring --create-output-dirs
+```
+
+Build one-step capability exposures and capability updates:
+
+```powershell
+python scripts/run_abm_v4_base.py --build-capability-update --create-output-dirs
 ```
 
 ## Output Root

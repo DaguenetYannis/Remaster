@@ -4,6 +4,7 @@ import argparse
 
 import polars as pl
 
+from src.abm_v4.capabilities import CapabilityUpdater
 from src.abm_v4.config import ABMV4Config
 from src.abm_v4.diagnostics import build_path_audit_rows, format_path_audit_table
 from src.abm_v4.ecosystem import EcosystemMapper
@@ -63,6 +64,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--build-supplier-rewiring",
         action="store_true",
         help="Build Phase 4C initial weights, rewiring flags, and updated weights.",
+    )
+    parser.add_argument(
+        "--build-capability-update",
+        action="store_true",
+        help="Build Phase 5 one-step capability exposure and update panels.",
     )
     parser.add_argument(
         "--candidate-debug-buyers",
@@ -306,6 +312,30 @@ def main() -> None:
         print(f"Rewiring flags path: {paths.supplier_rewiring_flags_path}")
         print(f"Updated weights path: {paths.supplier_updated_weights_path}")
         print(f"Supplier rewiring report path: {paths.supplier_rewiring_report_path}")
+        return
+
+    if args.build_capability_update:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--build-capability-update requires --create-output-dirs to write outputs."
+            )
+        updater = CapabilityUpdater(
+            paths=paths,
+            start_year=config.start_year,
+            end_year=config.end_year,
+            config=config.capability,
+        )
+        exposure_panel, update_panel, report = updater.build_capability_update()
+        updater.write_outputs(exposure_panel, update_panel, report)
+        report_row = report.to_dicts()[0]
+        print("Built capability update.")
+        print(f"Year: {report_row['year']}")
+        print(f"Node count: {report_row['node_count']}")
+        print(f"Mean delta cap: {report_row['mean_delta_cap']}")
+        print(f"Mean delta gcap: {report_row['mean_delta_gcap']}")
+        print(f"Capability exposure path: {paths.capability_exposure_panel_path}")
+        print(f"Capability update path: {paths.capability_update_panel_path}")
+        print(f"Capability report path: {paths.capability_update_report_path}")
         return
 
     if args.create_output_dirs:
