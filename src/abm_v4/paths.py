@@ -209,6 +209,18 @@ class ABMV4Paths:
         return self.diagnostics / "io_capability_coverage_by_source.csv"
 
     @property
+    def io_capability_robustness_path(self) -> Path:
+        return self.diagnostics / "io_capability_robustness.csv"
+
+    @property
+    def io_capability_threshold_sensitivity_path(self) -> Path:
+        return self.diagnostics / "io_capability_threshold_sensitivity.csv"
+
+    @property
+    def io_downstream_exposure_audit_path(self) -> Path:
+        return self.diagnostics / "io_downstream_exposure_audit.csv"
+
+    @property
     def production_feasibility_report_path(self) -> Path:
         return self.diagnostics / "production_feasibility_report.csv"
 
@@ -243,6 +255,22 @@ class ABMV4Paths:
     @property
     def one_step_base_status_json_path(self) -> Path:
         return self.validation / "one_step_base_status.json"
+
+    @property
+    def base_multiyear_state_panel_path(self) -> Path:
+        return self.simulations / "base_multiyear_state_panel.parquet"
+
+    @property
+    def base_multiyear_summary_panel_path(self) -> Path:
+        return self.simulations / "base_multiyear_summary_panel.csv"
+
+    @property
+    def base_multiyear_validation_report_path(self) -> Path:
+        return self.diagnostics / "base_multiyear_validation_report.csv"
+
+    @property
+    def base_multiyear_yearly_diagnostics_path(self) -> Path:
+        return self.diagnostics / "base_multiyear_yearly_diagnostics.csv"
 
     @property
     def supplier_edge_schema_report_path(self) -> Path:

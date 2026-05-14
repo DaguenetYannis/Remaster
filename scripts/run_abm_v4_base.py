@@ -11,7 +11,11 @@ from src.abm_v4.ecosystem import EcosystemMapper
 from src.abm_v4.emissions import EmissionsUpdater
 from src.abm_v4.paths import ABMV4Paths
 from src.abm_v4.production import ProductionFeasibilityEngine
-from src.abm_v4.simulation import inspect_base_model_readiness, run_one_step_base_orchestration
+from src.abm_v4.simulation import (
+    MultiYearBaseSimulator,
+    inspect_base_model_readiness,
+    run_one_step_base_orchestration,
+)
 from src.abm_v4.state import build_state_panel, repair_capability_coverage
 from src.abm_v4.suppliers import SupplierNetworkBuilder
 
@@ -99,6 +103,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run Phase 8 one-step ABM v4 base orchestration and validation.",
     )
     parser.add_argument(
+        "--run-multiyear-base",
+        action="store_true",
+        help="Run Phase 10 historical multi-year ABM v4 base simulation.",
+    )
+    parser.add_argument(
+        "--historical-production-forcing",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use observed historical output as the production scale anchor in the base simulation.",
+    )
+    parser.add_argument(
         "--repair-capability-coverage",
         action="store_true",
         help="Repair ABM v4 state capability coverage by joining Atlas capability data.",
@@ -107,6 +122,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--build-io-capability-model",
         action="store_true",
         help="Build Phase 9C source-aware Atlas/IO capability model fields.",
+    )
+    parser.add_argument(
+        "--audit-io-capability-robustness",
+        action="store_true",
+        help="Build Phase 9D IO capability robustness and downstream proxy diagnostics.",
     )
     parser.add_argument(
         "--force-rebuild-raw-t-edges",
@@ -256,6 +276,25 @@ def main() -> None:
         print(f"Selected lambda general up: {report_row['selected_lambda_general_up']}")
         print(f"Selected lambda green up: {report_row['selected_lambda_green_up']}")
         print(f"IO capability model report path: {paths.io_capability_model_report_path}")
+        return
+
+    if args.audit_io_capability_robustness:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--audit-io-capability-robustness requires --create-output-dirs to write diagnostics."
+            )
+        builder = IOCapabilityBuilder(
+            paths=paths,
+            start_year=config.start_year,
+            end_year=config.end_year,
+            config=config.capability,
+        )
+        result = builder.build_io_capability_robustness()
+        builder.write_robustness_outputs(result)
+        print("Built IO capability robustness diagnostics.")
+        print(f"Robustness path: {paths.io_capability_robustness_path}")
+        print(f"Threshold sensitivity path: {paths.io_capability_threshold_sensitivity_path}")
+        print(f"Downstream audit path: {paths.io_downstream_exposure_audit_path}")
         return
 
     if args.build_supplier_edges:
@@ -547,6 +586,29 @@ def main() -> None:
         print(f"Validation CSV: {paths.one_step_base_validation_report_csv_path}")
         print(f"Validation Markdown: {paths.one_step_base_validation_report_md_path}")
         print(f"Status JSON: {paths.one_step_base_status_json_path}")
+        return
+
+    if args.run_multiyear_base:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--run-multiyear-base requires --create-output-dirs to write simulation outputs."
+            )
+        simulator = MultiYearBaseSimulator(
+            paths=paths,
+            config=config,
+            historical_production_forcing=args.historical_production_forcing,
+            reuse_existing=args.reuse_existing,
+        )
+        result = simulator.run()
+        simulator.write_outputs(result)
+        validation_row = result.validation_report.to_dicts()[0]
+        print("Ran ABM v4 multi-year base simulation.")
+        print(f"Years: {validation_row['simulation_start_year']}-{validation_row['simulation_end_year']}")
+        print(f"Status: {validation_row['status']}")
+        print(f"Historical production forcing: {validation_row['historical_production_forcing']}")
+        print(f"State panel: {paths.base_multiyear_state_panel_path}")
+        print(f"Summary panel: {paths.base_multiyear_summary_panel_path}")
+        print(f"Validation report: {paths.base_multiyear_validation_report_path}")
         return
 
     if args.create_output_dirs:

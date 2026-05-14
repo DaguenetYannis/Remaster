@@ -55,6 +55,15 @@ class IOCapabilityModelResult:
     coverage_by_source: pl.DataFrame
 
 
+@dataclass(frozen=True)
+class IOCapabilityRobustnessResult:
+    """Diagnostic-only robustness outputs for the IO capability model."""
+
+    robustness: pl.DataFrame
+    threshold_sensitivity: pl.DataFrame
+    downstream_audit: pl.DataFrame
+
+
 class CapabilityUpdater:
     """Build one-step ABM v4 general and green capability updates."""
 
@@ -914,14 +923,7 @@ class IOCapabilityBuilder:
 
     def build_io_capability_model(self) -> IOCapabilityModelResult:
         """Build state-panel capability model fields and diagnostics."""
-        state = self.prepare_atlas_observed_flags(self.load_state_panel())
-        weights = self.load_supplier_weights()
-        upstream = self.compute_upstream_observed_capability_exposure(state, weights)
-        downstream = self.compute_downstream_observed_capability_exposure(state, weights)
-        exposure = (
-            state.join(upstream, on=["country_sector", "Year"], how="left")
-            .join(downstream, on=["country_sector", "Year"], how="left")
-        )
+        exposure = self.build_io_exposure_panel()
         lambda_general, calibration_general = self.calibrate_lambda(exposure, "general")
         lambda_green, calibration_green = self.calibrate_lambda(exposure, "green")
         modeled = self.compute_io_capability(exposure, lambda_general, lambda_green)
@@ -935,6 +937,206 @@ class IOCapabilityBuilder:
             coverage_by_source=self.build_coverage_by_source(modeled),
         )
 
+    def build_io_exposure_panel(self) -> pl.DataFrame:
+        """Build upstream/downstream observed-neighbour exposure panel."""
+        state = self._drop_existing_io_capability_columns(
+            self.prepare_atlas_observed_flags(self.load_state_panel())
+        )
+        weights = self.load_supplier_weights()
+        upstream = self.compute_upstream_observed_capability_exposure(state, weights)
+        downstream = self.compute_downstream_observed_capability_exposure(state, weights)
+        return (
+            state.join(upstream, on=["country_sector", "Year"], how="left")
+            .join(downstream, on=["country_sector", "Year"], how="left")
+        )
+
+    def _drop_existing_io_capability_columns(self, state: pl.DataFrame) -> pl.DataFrame:
+        """Drop previously generated IO capability columns before recomputing them."""
+        generated_prefixes = (
+            "general_capability_io",
+            "green_capability_io",
+            "general_capability_upstream",
+            "green_capability_upstream",
+            "general_capability_downstream",
+            "green_capability_downstream",
+        )
+        generated_columns = {
+            "general_capability_model",
+            "green_capability_model",
+        }
+        drop_columns = [
+            column
+            for column in state.columns
+            if column in generated_columns
+            or any(column.startswith(prefix) for prefix in generated_prefixes)
+        ]
+        if not drop_columns:
+            return state
+        return state.drop(drop_columns)
+
+    def build_io_capability_robustness(self) -> IOCapabilityRobustnessResult:
+        """Build robustness and downstream proxy audit diagnostics without writing state."""
+        exposure = self.build_io_exposure_panel()
+        lambda_general, _ = self.calibrate_lambda(exposure, "general")
+        lambda_green, _ = self.calibrate_lambda(exposure, "green")
+        robustness = self.build_robustness_report(
+            exposure=exposure,
+            lambda_general_up=lambda_general,
+            lambda_green_up=lambda_green,
+            gamma=self.config.io_capability_min_coverage,
+        )
+        threshold = self.build_threshold_sensitivity_report(
+            exposure=exposure,
+            lambda_general_up=lambda_general,
+            lambda_green_up=lambda_green,
+            gamma_values=(0.1, 0.3, 0.5),
+        )
+        downstream = self.build_downstream_exposure_audit(exposure)
+        return IOCapabilityRobustnessResult(
+            robustness=robustness,
+            threshold_sensitivity=threshold,
+            downstream_audit=downstream,
+        )
+
+    def build_robustness_report(
+        self,
+        exposure: pl.DataFrame,
+        lambda_general_up: float,
+        lambda_green_up: float,
+        gamma: float,
+    ) -> pl.DataFrame:
+        """Compare atlas-only, upstream-only, downstream-only, and calibrated IO specs."""
+        rows = []
+        specs = {
+            "atlas_only": (None, None),
+            "upstream_only": (1.0, 1.0),
+            "downstream_only": (0.0, 0.0),
+            "calibrated_io": (lambda_general_up, lambda_green_up),
+        }
+        latest_year = exposure["Year"].max()
+        for spec_name, lambdas in specs.items():
+            modeled = self._assign_spec_model(exposure, spec_name, lambdas, gamma)
+            latest = modeled.filter(pl.col("Year") == latest_year)
+            for capability_type in ("general", "green"):
+                value_col = f"{capability_type}_capability_model"
+                source_col = f"{capability_type}_capability_source"
+                coverage_col = f"{capability_type}_capability_io_coverage"
+                mae, rmse, observations = self._validation_error(
+                    modeled,
+                    capability_type=capability_type,
+                    spec_name=spec_name,
+                    lambdas=lambdas,
+                )
+                rows.append(
+                    {
+                        "specification": spec_name,
+                        "capability_type": capability_type,
+                        "coverage": latest[value_col].is_not_null().sum() / latest.height
+                        if latest.height
+                        else 0.0,
+                        "unavailable_share": (
+                            latest.filter(pl.col(source_col) == "unavailable").height
+                            / latest.height
+                            if latest.height
+                            else 0.0
+                        ),
+                        "mean_capability_model": latest[value_col].mean(),
+                        "median_capability_model": latest[value_col].median(),
+                        "validation_mae": mae,
+                        "validation_rmse": rmse,
+                        "validation_observations": observations,
+                        "mean_io_coverage": latest[coverage_col].mean(),
+                    }
+                )
+        return pl.DataFrame(rows)
+
+    def build_threshold_sensitivity_report(
+        self,
+        exposure: pl.DataFrame,
+        lambda_general_up: float,
+        lambda_green_up: float,
+        gamma_values: tuple[float, ...],
+    ) -> pl.DataFrame:
+        """Report calibrated-IO source counts under alternative coverage thresholds."""
+        rows = []
+        latest_year = exposure["Year"].max()
+        for gamma in gamma_values:
+            modeled = self._assign_spec_model(
+                exposure,
+                "calibrated_io",
+                (lambda_general_up, lambda_green_up),
+                gamma,
+            )
+            latest = modeled.filter(pl.col("Year") == latest_year)
+            for capability_type in ("general", "green"):
+                source_col = f"{capability_type}_capability_source"
+                coverage_col = f"{capability_type}_capability_io_coverage"
+                mae, rmse, observations = self._validation_error(
+                    modeled,
+                    capability_type=capability_type,
+                    spec_name="calibrated_io",
+                    lambdas=(lambda_general_up, lambda_green_up),
+                )
+                rows.append(
+                    {
+                        "gamma": gamma,
+                        "capability_type": capability_type,
+                        "io_imputed_count": latest.filter(pl.col(source_col) == "io_imputed").height,
+                        "unavailable_count": latest.filter(pl.col(source_col) == "unavailable").height,
+                        "validation_mae": mae,
+                        "validation_rmse": rmse,
+                        "validation_observations": observations,
+                        "mean_io_coverage": latest[coverage_col].mean(),
+                    }
+                )
+        return pl.DataFrame(rows)
+
+    def build_downstream_exposure_audit(self, exposure: pl.DataFrame) -> pl.DataFrame:
+        """Audit the compact downstream exposure proxy and document raw-T limitation."""
+        latest = exposure.filter(pl.col("Year") == exposure["Year"].max())
+        return pl.DataFrame(
+            {
+                "selected_year": [latest["Year"].max()],
+                "compact_proxy": ["supplier_updated_weights_downstream_sales_share"],
+                "compact_nodes": [latest.height],
+                "general_downstream_available": [
+                    latest["general_capability_io_downstream"].is_not_null().sum()
+                ],
+                "green_downstream_available": [
+                    latest["green_capability_io_downstream"].is_not_null().sum()
+                ],
+                "mean_general_downstream_coverage": [
+                    latest["general_capability_downstream_coverage"].mean()
+                ],
+                "mean_green_downstream_coverage": [
+                    latest["green_capability_downstream_coverage"].mean()
+                ],
+                "raw_t_comparison_status": [
+                    "not_run_full_raw_t_aggregation_in_phase_9d"
+                ],
+                "raw_t_comparison_rows": [None],
+                "correlation_general_compact_vs_raw_t": [None],
+                "correlation_green_compact_vs_raw_t": [None],
+                "notes": [
+                    (
+                        "Phase 9D audits the compact downstream proxy used by v4. "
+                        "Full raw-T downstream aggregation over the 531M edge panel was not run "
+                        "to avoid a heavy diagnostic pass before multi-year simulation; this remains "
+                        "a known robustness caveat."
+                    )
+                ],
+            }
+        )
+
+    def write_robustness_outputs(self, result: IOCapabilityRobustnessResult) -> None:
+        """Write diagnostic-only IO capability robustness outputs."""
+        self.paths.diagnostics.mkdir(parents=True, exist_ok=True)
+        result.robustness.write_csv(self.paths.io_capability_robustness_path)
+        result.threshold_sensitivity.write_csv(
+            self.paths.io_capability_threshold_sensitivity_path
+        )
+        result.downstream_audit.write_csv(self.paths.io_downstream_exposure_audit_path)
+
     def write_outputs(self, result: IOCapabilityModelResult) -> None:
         """Write the IO capability model fields and diagnostics."""
         self.paths.inputs.mkdir(parents=True, exist_ok=True)
@@ -944,6 +1146,116 @@ class IOCapabilityBuilder:
         result.model_report.write_csv(self.paths.io_capability_model_report_path)
         result.coverage_by_sector.write_csv(self.paths.io_capability_coverage_by_sector_path)
         result.coverage_by_source.write_csv(self.paths.io_capability_coverage_by_source_path)
+
+    def _assign_spec_model(
+        self,
+        exposure: pl.DataFrame,
+        spec_name: str,
+        lambdas: tuple[float, float] | tuple[None, None] | None,
+        gamma: float,
+    ) -> pl.DataFrame:
+        if spec_name == "atlas_only":
+            return exposure.with_columns(
+                pl.when(pl.col("general_capability_atlas_observed"))
+                .then(pl.col("general_capability"))
+                .otherwise(None)
+                .alias("general_capability_model"),
+                pl.when(pl.col("green_capability_atlas_observed"))
+                .then(pl.col("green_capability"))
+                .otherwise(None)
+                .alias("green_capability_model"),
+                pl.when(pl.col("general_capability_atlas_observed"))
+                .then(pl.lit("atlas_observed"))
+                .otherwise(pl.lit("unavailable"))
+                .alias("general_capability_source"),
+                pl.when(pl.col("green_capability_atlas_observed"))
+                .then(pl.lit("atlas_observed"))
+                .otherwise(pl.lit("unavailable"))
+                .alias("green_capability_source"),
+                pl.lit(0.0).alias("general_capability_io_coverage"),
+                pl.lit(0.0).alias("green_capability_io_coverage"),
+            )
+        lambda_general, lambda_green = lambdas or (1.0, 1.0)
+        modeled = self.compute_io_capability(exposure, lambda_general, lambda_green)
+        old_gamma = self.config.io_capability_min_coverage
+        if gamma == old_gamma:
+            return self.assign_capability_model(modeled)
+        return modeled.with_columns(
+            pl.when(pl.col("general_capability_atlas_observed"))
+            .then(pl.col("general_capability"))
+            .when(
+                pl.col("general_capability_io").is_not_null()
+                & (pl.col("general_capability_io_coverage") >= gamma)
+            )
+            .then(pl.col("general_capability_io"))
+            .otherwise(None)
+            .alias("general_capability_model"),
+            pl.when(pl.col("green_capability_atlas_observed"))
+            .then(pl.col("green_capability"))
+            .when(
+                pl.col("green_capability_io").is_not_null()
+                & (pl.col("green_capability_io_coverage") >= gamma)
+            )
+            .then(pl.col("green_capability_io"))
+            .otherwise(None)
+            .alias("green_capability_model"),
+            pl.when(pl.col("general_capability_atlas_observed"))
+            .then(pl.lit("atlas_observed"))
+            .when(
+                pl.col("general_capability_io").is_not_null()
+                & (pl.col("general_capability_io_coverage") >= gamma)
+            )
+            .then(pl.lit("io_imputed"))
+            .otherwise(pl.lit("unavailable"))
+            .alias("general_capability_source"),
+            pl.when(pl.col("green_capability_atlas_observed"))
+            .then(pl.lit("atlas_observed"))
+            .when(
+                pl.col("green_capability_io").is_not_null()
+                & (pl.col("green_capability_io_coverage") >= gamma)
+            )
+            .then(pl.lit("io_imputed"))
+            .otherwise(pl.lit("unavailable"))
+            .alias("green_capability_source"),
+        )
+
+    def _validation_error(
+        self,
+        exposure: pl.DataFrame,
+        capability_type: str,
+        spec_name: str,
+        lambdas: tuple[float, float] | tuple[None, None] | None,
+    ) -> tuple[float | None, float | None, int]:
+        value_col = f"{capability_type}_capability"
+        observed_col = f"{capability_type}_capability_atlas_observed"
+        if spec_name == "atlas_only":
+            return 0.0, 0.0, exposure.filter(pl.col(observed_col)).height
+        if spec_name == "upstream_only":
+            pred_expr = pl.col(f"{capability_type}_capability_io_upstream")
+        elif spec_name == "downstream_only":
+            pred_expr = pl.col(f"{capability_type}_capability_io_downstream")
+        else:
+            lambda_up = (lambdas or (1.0, 1.0))[0 if capability_type == "general" else 1]
+            pred_expr = (
+                lambda_up * pl.col(f"{capability_type}_capability_io_upstream")
+                + (1 - lambda_up) * pl.col(f"{capability_type}_capability_io_downstream")
+            )
+        scored = (
+            exposure.with_columns(pred_expr.alias("_prediction"))
+            .filter(
+                pl.col(observed_col)
+                & pl.col(value_col).is_not_null()
+                & pl.col("_prediction").is_not_null()
+                & pl.col(value_col).is_finite()
+                & pl.col("_prediction").is_finite()
+            )
+            .with_columns((pl.col("_prediction") - pl.col(value_col)).alias("_error"))
+        )
+        if scored.is_empty():
+            return None, None, 0
+        mae = scored["_error"].abs().mean()
+        rmse = math.sqrt(scored.select((pl.col("_error") ** 2).mean()).item())
+        return mae, rmse, scored.height
 
     def _weighted_exposure(
         self,

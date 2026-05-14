@@ -850,6 +850,127 @@ Caveat:
 
 - IO-imputed capability is a model-derived proxy for network-embedded productive capability. It is not observed Atlas product-space capability and should remain source-labeled throughout simulation and diagnostics.
 
+## Phase 9D IO Capability Robustness and Downstream Exposure Audit
+
+ABM v4 now writes diagnostic-only robustness checks for the source-aware IO capability model. This phase does not rebuild the state panel, does not run multi-year simulation, and does not create scenarios.
+
+Command:
+
+```powershell
+python scripts/run_abm_v4_base.py --audit-io-capability-robustness --create-output-dirs
+```
+
+Generated outputs:
+
+```text
+data/abm_v4/diagnostics/io_capability_robustness.csv
+data/abm_v4/diagnostics/io_capability_threshold_sensitivity.csv
+data/abm_v4/diagnostics/io_downstream_exposure_audit.csv
+```
+
+Robustness by specification:
+
+| Specification | Capability | Coverage | Unavailable share | Validation MAE | Validation RMSE |
+| --- | --- | ---: | ---: | ---: | ---: |
+| atlas_only | general | 0.5949135300101729 | 0.40508646998982706 | 0.0 | 0.0 |
+| atlas_only | green | 0.5949135300101729 | 0.40508646998982706 | 0.0 | 0.0 |
+| upstream_only | general | 0.9617497456765005 | 0.03825025432349949 | 0.4334685204006095 | 0.6586782297708024 |
+| upstream_only | green | 0.9617497456765005 | 0.03825025432349949 | 0.1108124920875149 | 0.1648325087477197 |
+| downstream_only | general | 0.8626653102746694 | 0.1373346897253306 | 0.4171692660890992 | 0.5982642107155396 |
+| downstream_only | green | 0.8626653102746694 | 0.1373346897253306 | 0.08823890550156882 | 0.1592492542158855 |
+| calibrated_io | general | 0.9098677517802645 | 0.0901322482197355 | 0.407775861953647 | 0.5757752863611213 |
+| calibrated_io | green | 0.8626653102746694 | 0.1373346897253306 | 0.08823890550156885 | 0.1592492542158855 |
+
+Interpretation:
+
+- `calibrated_io` remains the preferred general-capability specification because it has the lowest validation MAE/RMSE among non-trivial IO specifications while preserving much better coverage than `atlas_only`.
+- Green capability calibration selects lambda_up = 0.0, so `calibrated_io` is effectively downstream-only for green capability.
+- The downstream-heavy green result should be treated cautiously because downstream exposure currently uses the compact supplier-weight downstream proxy, not full raw-T sales shares.
+
+Coverage-threshold sensitivity:
+
+| Gamma | Capability | IO-imputed count | Unavailable count | Validation MAE | Mean IO coverage |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 0.1 | general | 1,838 | 153 | 0.407775861953647 | 0.6160665743353818 |
+| 0.1 | green | 1,465 | 526 | 0.08823890550156885 | 0.5318590585671328 |
+| 0.3 | general | 1,548 | 443 | 0.407775861953647 | 0.6160665743353818 |
+| 0.3 | green | 1,316 | 675 | 0.08823890550156885 | 0.5318590585671328 |
+| 0.5 | general | 1,174 | 817 | 0.407775861953647 | 0.6160665743353818 |
+| 0.5 | green | 893 | 1,098 | 0.08823890550156885 | 0.5318590585671328 |
+
+The default gamma = 0.3 is a middle position: it keeps substantial IO coverage while excluding weakly supported nodes.
+
+Downstream exposure audit:
+
+- Compact proxy: `supplier_updated_weights_downstream_sales_share`
+- Selected year: 2016
+- Compact nodes: 4,915
+- General downstream exposure available: 4,244 nodes
+- Green downstream exposure available: 4,244 nodes
+- Mean downstream coverage: 0.6159489332840381
+- Full raw-T downstream aggregation was not run in Phase 9D because the raw edge panel has 531M rows and the audit should remain a lightweight pre-simulation diagnostic.
+
+Remaining caveat before multi-year simulation:
+
+- The IO capability model is more defensible than median filling and passes the one-step integration checks, but the green-capability result depends strongly on the compact downstream proxy. Before policy/scenario interpretation, the raw-T downstream aggregation should be implemented or sampled against the compact proxy.
+
+## Phase 10 Multi-Year Base Simulation
+
+Phase 10 adds the first ABM v4 historical multi-year base loop. This is a conservative integration loop, not a policy scenario and not a calibrated projection engine.
+
+Simulation modes implemented:
+
+- Smoke run: `2015-2016`
+- Historical base run: `1995-2016`
+
+The manual smoke run succeeded, then the full `1995-2016` historical base run succeeded.
+
+Historical production forcing:
+
+- Enabled in the current Phase 10 default.
+- `X_sim` is anchored to observed historical production by year.
+- EI and emissions evolve through the simulated transition rule.
+- This keeps the first multi-year loop focused on supplier, capability, and EI-transition integration before recursive production propagation is added.
+
+Validation results from the full `1995-2016` run:
+
+| Metric | Result |
+| --- | ---: |
+| Simulation years | 22 |
+| Overall status | warning |
+| Blocking issues | none |
+| Raw-T rebuilt | false |
+| Scenario outputs created | false |
+| Max emissions identity error | 0.0 |
+| Max supplier weight sum error | 2.220446049250313e-16 |
+| Valid simulated EI remains positive | true |
+| Historical production forcing | true |
+
+Latest simulated year (`2016`) aggregate validation:
+
+| Metric | Result |
+| --- | ---: |
+| Total X observed | 153240228193.02582 |
+| Total X simulated | 153240228193.02582 |
+| Aggregate X error pct | 0.0 |
+| Total emissions observed | 41772432.07913907 |
+| Total emissions simulated | 74374578.30185504 |
+| Aggregate emissions error pct | 0.7804703868079855 |
+| Mean rEI used | 0.016735856455233306 |
+| Capability unavailable share | 0.0901322482197355 |
+| Bad transition flag | false |
+
+Warnings:
+
+- Production is historically forced.
+- Aggregate emissions error is high, so the current base loop is useful as an integration check but not yet ready for scenario interpretation.
+
+Readiness assessment:
+
+- Phase 10 is ready as a smoke-safe multi-year integration harness.
+- The model is not yet ready for policy scenario design until production dynamics are no longer historically forced or the forcing mode is explicitly accepted for the intended scenario question.
+- Next recommended phase: replace or extend the historically forced production step with a recursive production propagation/update layer, then rerun historical validation before scenario design.
+
 ## Extension from ABM v3
 
 ABM v4 introduces a separate namespace and output root. It can inspect ABM v3 outputs as preferred inputs, but writes only under `data/abm_v4/` when explicitly run.
@@ -940,6 +1061,18 @@ Compare default frontier-gap emissions transition with the legacy raw-log rule:
 python scripts/run_abm_v4_base.py --build-emissions-transition-comparison --create-output-dirs
 ```
 
+Run the smoke-safe multi-year base simulation:
+
+```powershell
+python scripts/run_abm_v4_base.py --run-multiyear-base --start-year 2015 --end-year 2016 --create-output-dirs --reuse-existing
+```
+
+Run the full historical multi-year base simulation:
+
+```powershell
+python scripts/run_abm_v4_base.py --run-multiyear-base --start-year 1995 --end-year 2016 --create-output-dirs --reuse-existing
+```
+
 ## Output Root
 
 ```text
@@ -948,7 +1081,7 @@ data/abm_v4/
 
 ## Remaining for v5 or Later Phases
 
-- Implement supplier opportunity sets and supplier-side rewiring.
-- Implement iterative production propagation.
-- Write emissions decomposition outputs.
-- Add policy scenarios after the base model works.
+- Replace or extend historically forced production with recursive production propagation.
+- Validate the compact downstream capability proxy against raw-T downstream aggregation.
+- Calibrate frontier-gap emissions parameters against historical rEI.
+- Add policy scenarios only after the historical base loop is stable enough for the intended interpretation.

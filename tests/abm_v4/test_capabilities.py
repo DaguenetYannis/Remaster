@@ -383,3 +383,104 @@ def test_io_capability_outputs_write_only_when_enabled() -> None:
     builder.write_outputs(result)
     assert paths.io_capability_model_report_path.exists()
     assert paths.io_capability_lambda_calibration_path.exists()
+
+
+def test_robustness_atlas_only_leaves_missing_nodes_unavailable() -> None:
+    builder = IOCapabilityBuilder(paths=ABMV4Paths(project_root=toy_root()))
+    state = builder.prepare_atlas_observed_flags(toy_io_state_panel())
+    upstream = builder.compute_upstream_observed_capability_exposure(state, toy_io_weights())
+    downstream = builder.compute_downstream_observed_capability_exposure(state, toy_io_weights())
+    exposure = state.join(upstream, on=["country_sector", "Year"], how="left").join(
+        downstream, on=["country_sector", "Year"], how="left"
+    )
+
+    modeled = builder._assign_spec_model(exposure, "atlas_only", None, 0.3)
+
+    assert modeled.filter(pl.col("country_sector") == "C")[
+        "general_capability_source"
+    ].item() == "unavailable"
+
+
+def test_robustness_upstream_and_downstream_specs_use_expected_exposure() -> None:
+    builder = IOCapabilityBuilder(paths=ABMV4Paths(project_root=toy_root()))
+    state = builder.prepare_atlas_observed_flags(toy_io_state_panel())
+    upstream = builder.compute_upstream_observed_capability_exposure(state, toy_io_weights())
+    downstream = builder.compute_downstream_observed_capability_exposure(state, toy_io_weights())
+    exposure = state.join(upstream, on=["country_sector", "Year"], how="left").join(
+        downstream, on=["country_sector", "Year"], how="left"
+    )
+
+    up = builder._assign_spec_model(exposure, "upstream_only", (1.0, 1.0), 0.3)
+    down = builder._assign_spec_model(exposure, "downstream_only", (0.0, 0.0), 0.3)
+
+    assert up.filter(pl.col("country_sector") == "C")["general_capability_model"].item() == 1.0
+    assert down.filter(pl.col("country_sector") == "C")["general_capability_model"].item() == 0.5
+
+
+def test_robustness_calibrated_io_uses_selected_lambda() -> None:
+    builder = IOCapabilityBuilder(paths=ABMV4Paths(project_root=toy_root()))
+    state = builder.prepare_atlas_observed_flags(toy_io_state_panel())
+    upstream = builder.compute_upstream_observed_capability_exposure(state, toy_io_weights())
+    downstream = builder.compute_downstream_observed_capability_exposure(state, toy_io_weights())
+    exposure = state.join(upstream, on=["country_sector", "Year"], how="left").join(
+        downstream, on=["country_sector", "Year"], how="left"
+    )
+
+    modeled = builder._assign_spec_model(exposure, "calibrated_io", (0.5, 0.5), 0.3)
+
+    assert modeled.filter(pl.col("country_sector") == "C")[
+        "general_capability_model"
+    ].item() == 0.75
+
+
+def test_threshold_sensitivity_changes_imputed_counts() -> None:
+    builder = IOCapabilityBuilder(paths=ABMV4Paths(project_root=toy_root()))
+    state = builder.prepare_atlas_observed_flags(toy_io_state_panel())
+    upstream = builder.compute_upstream_observed_capability_exposure(state, toy_io_weights())
+    downstream = builder.compute_downstream_observed_capability_exposure(state, toy_io_weights())
+    exposure = state.join(upstream, on=["country_sector", "Year"], how="left").join(
+        downstream, on=["country_sector", "Year"], how="left"
+    )
+
+    sensitivity = builder.build_threshold_sensitivity_report(exposure, 1.0, 1.0, (0.1, 0.9))
+    general = sensitivity.filter(pl.col("capability_type") == "general").sort("gamma")
+
+    assert general["io_imputed_count"][0] >= general["io_imputed_count"][1]
+    assert general["unavailable_count"][0] <= general["unavailable_count"][1]
+
+
+def test_robustness_report_includes_expected_specifications() -> None:
+    builder = IOCapabilityBuilder(paths=ABMV4Paths(project_root=toy_root()))
+    state = builder.prepare_atlas_observed_flags(toy_io_state_panel())
+    upstream = builder.compute_upstream_observed_capability_exposure(state, toy_io_weights())
+    downstream = builder.compute_downstream_observed_capability_exposure(state, toy_io_weights())
+    exposure = state.join(upstream, on=["country_sector", "Year"], how="left").join(
+        downstream, on=["country_sector", "Year"], how="left"
+    )
+
+    report = builder.build_robustness_report(exposure, 0.5, 0.5, 0.3)
+
+    assert set(report["specification"].unique()) == {
+        "atlas_only",
+        "upstream_only",
+        "downstream_only",
+        "calibrated_io",
+    }
+
+
+def test_robustness_diagnostics_write_only_when_enabled() -> None:
+    root = toy_root()
+    paths = ABMV4Paths(project_root=root)
+    paths.state_panel_path(1995, 2016).parent.mkdir(parents=True, exist_ok=True)
+    toy_io_state_panel().write_parquet(paths.state_panel_path(1995, 2016))
+    paths.supplier_updated_weights_path.parent.mkdir(parents=True, exist_ok=True)
+    toy_io_weights().write_parquet(paths.supplier_updated_weights_path)
+    builder = IOCapabilityBuilder(paths=paths)
+
+    result = builder.build_io_capability_robustness()
+
+    assert not paths.io_capability_robustness_path.exists()
+    builder.write_robustness_outputs(result)
+    assert paths.io_capability_robustness_path.exists()
+    assert paths.io_capability_threshold_sensitivity_path.exists()
+    assert paths.io_downstream_exposure_audit_path.exists()

@@ -6,7 +6,11 @@ import pytest
 
 from src.abm_v4.config import ABMV4Config
 from src.abm_v4.paths import ABMV4Paths
-from src.abm_v4.simulation import inspect_base_model_readiness, run_one_step_base_orchestration
+from src.abm_v4.simulation import (
+    MultiYearBaseSimulator,
+    inspect_base_model_readiness,
+    run_one_step_base_orchestration,
+)
 
 
 def test_simulation_readiness_fails_clearly_without_sources() -> None:
@@ -217,3 +221,123 @@ def test_one_step_markdown_report_written_only_when_enabled() -> None:
     assert paths.one_step_base_validation_report_csv_path.exists()
     assert paths.one_step_base_validation_report_md_path.exists()
     assert paths.one_step_base_status_json_path.exists()
+
+
+def _write_multiyear_toy_inputs(paths: ABMV4Paths, config: ABMV4Config) -> None:
+    state_path = paths.state_panel_path(config.start_year, config.end_year)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    pl.DataFrame(
+        {
+            "country_sector": ["A", "B", "A", "B"],
+            "Year": [2015, 2015, 2016, 2016],
+            "Country": ["AA", "BB", "AA", "BB"],
+            "Sector": ["S1", "S1", "S1", "S1"],
+            "ecosystem_id": ["eco", "eco", "eco", "eco"],
+            "ecosystem_label": ["Eco", "Eco", "Eco", "Eco"],
+            "X_observed": [100.0, 200.0, 110.0, 210.0],
+            "EI": [0.5, 0.2, 9.0, 9.0],
+            "emissions_observed": [50.0, 40.0, 990.0, 1890.0],
+            "general_capability_model": [0.4, 0.8, 0.5, 0.9],
+            "green_capability_model": [0.3, 0.7, 0.4, 0.8],
+            "general_capability_source": ["atlas_observed", "atlas_observed", "atlas_observed", "atlas_observed"],
+            "green_capability_source": ["atlas_observed", "atlas_observed", "atlas_observed", "atlas_observed"],
+            "network_green_exposure": [0.2, 0.6, 0.3, 0.7],
+            "brown_centrality": [0.1, 0.2, 0.1, 0.2],
+        }
+    ).write_parquet(state_path)
+    paths.supplier_rewiring_flags_path.parent.mkdir(parents=True, exist_ok=True)
+    pl.DataFrame(
+        {
+            "buyer_country_sector": ["A", "B"],
+            "p_rewire": [0.1, 0.2],
+            "rewire_flag": [True, False],
+        }
+    ).write_parquet(paths.supplier_rewiring_flags_path)
+    _write_csv(
+        paths.supplier_rewiring_report_path,
+        {
+            "rewired_buyer_share": 0.5,
+            "max_updated_weight_sum_error": 0.0,
+        },
+    )
+
+
+def test_multiyear_smoke_simulation_runs_for_two_years() -> None:
+    paths = _toy_paths()
+    config = ABMV4Config(start_year=2015, end_year=2016)
+    _write_multiyear_toy_inputs(paths, config)
+
+    result = MultiYearBaseSimulator(paths, config).run()
+
+    assert result.state_panel["year"].n_unique() == 2
+    assert result.summary_panel.height == 2
+
+
+def test_multiyear_first_year_initializes_from_observed_state() -> None:
+    paths = _toy_paths()
+    config = ABMV4Config(start_year=2015, end_year=2016)
+    _write_multiyear_toy_inputs(paths, config)
+
+    first = MultiYearBaseSimulator(paths, config).run().state_panel.filter(pl.col("year") == 2015)
+
+    assert first.sort("country_sector")["EI_sim"].to_list() == [0.5, 0.2]
+    assert first.sort("country_sector")["X_sim"].to_list() == [100.0, 200.0]
+
+
+def test_multiyear_next_year_does_not_overwrite_with_observed_future_ei() -> None:
+    paths = _toy_paths()
+    config = ABMV4Config(start_year=2015, end_year=2016)
+    _write_multiyear_toy_inputs(paths, config)
+
+    second = MultiYearBaseSimulator(paths, config).run().state_panel.filter(pl.col("year") == 2016)
+
+    assert second["EI_sim"].max() < 9.0
+
+
+def test_multiyear_emissions_identity_holds_and_ei_positive() -> None:
+    paths = _toy_paths()
+    config = ABMV4Config(start_year=2015, end_year=2016)
+    _write_multiyear_toy_inputs(paths, config)
+
+    panel = MultiYearBaseSimulator(paths, config).run().state_panel
+    residual = (panel["emissions_sim"] - panel["X_sim"] * panel["EI_sim"]).abs().max()
+
+    assert residual < 1e-9
+    assert panel.filter(~pl.col("invalid_EI_flag"))["EI_sim"].min() > 0
+
+
+def test_multiyear_historical_production_forcing_is_explicit() -> None:
+    paths = _toy_paths()
+    config = ABMV4Config(start_year=2015, end_year=2016)
+    _write_multiyear_toy_inputs(paths, config)
+
+    validation = MultiYearBaseSimulator(paths, config, historical_production_forcing=True).run().validation_report
+
+    assert validation["historical_production_forcing"].item()
+    assert "production is historically forced" in validation["warnings"].item()
+
+
+def test_multiyear_outputs_write_only_when_enabled() -> None:
+    paths = _toy_paths()
+    config = ABMV4Config(start_year=2015, end_year=2016)
+    _write_multiyear_toy_inputs(paths, config)
+    simulator = MultiYearBaseSimulator(paths, config)
+
+    result = simulator.run()
+
+    assert not paths.base_multiyear_state_panel_path.exists()
+    simulator.write_outputs(result)
+    assert paths.base_multiyear_state_panel_path.exists()
+    assert paths.base_multiyear_summary_panel_path.exists()
+    assert paths.base_multiyear_validation_report_path.exists()
+
+
+def test_multiyear_validation_report_includes_status_and_raw_t_not_rebuilt() -> None:
+    paths = _toy_paths()
+    config = ABMV4Config(start_year=2015, end_year=2016)
+    _write_multiyear_toy_inputs(paths, config)
+
+    validation = MultiYearBaseSimulator(paths, config).run().validation_report
+
+    assert validation["status"].item() in {"pass", "warning"}
+    assert not validation["raw_t_rebuilt"].item()
