@@ -8,7 +8,12 @@ from src.abm_v4.capabilities import CapabilityUpdater, IOCapabilityBuilder
 from src.abm_v4.config import ABMV4Config
 from src.abm_v4.diagnostics import build_path_audit_rows, format_path_audit_table
 from src.abm_v4.ecosystem import EcosystemMapper
-from src.abm_v4.emissions import EmissionsTransitionCalibrator, EmissionsUpdater
+from src.abm_v4.emissions import (
+    EmissionsTransitionCalibrator,
+    EmissionsTransitionHypothesisDiagnostics,
+    EmissionsTransitionVariantComparator,
+    EmissionsUpdater,
+)
 from src.abm_v4.paths import ABMV4Paths
 from src.abm_v4.production import ProductionFeasibilityEngine
 from src.abm_v4.simulation import (
@@ -19,6 +24,13 @@ from src.abm_v4.simulation import (
 from src.abm_v4.state import build_state_panel, repair_capability_coverage
 from src.abm_v4.suppliers import SupplierNetworkBuilder
 from src.abm_v4.validation import MultiYearHistoricalValidator
+from src.abm_v4.validation import (
+    ElectricityDataAudit,
+    HighEmissionsDampeningDiagnostics,
+    TransitionRuleTradeoffDiagnostics,
+    build_multiyear_base_model_comparison,
+    write_multiyear_base_model_comparison,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -89,9 +101,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--emissions-transition-mode",
-        choices=("frontier_gap_readiness", "legacy_raw_log"),
+        choices=("frontier_gap_readiness", "legacy_raw_log", "historical_frontier_gap_only"),
         default=None,
         help="Emissions transition rule to use for --build-emissions-update.",
+    )
+    parser.add_argument(
+        "--emissions-parameter-file",
+        default=None,
+        help="Optional JSON parameter file for calibrated-historical emissions rules.",
     )
     parser.add_argument(
         "--build-emissions-transition-comparison",
@@ -118,10 +135,49 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Build Phase 12 emissions-transition parameter calibration diagnostics.",
     )
+    parser.add_argument(
+        "--diagnose-emissions-hypotheses",
+        action="store_true",
+        help="Build Phase 13 hypothesis diagnostics for weak emissions-transition calibration.",
+    )
+    parser.add_argument(
+        "--compare-emissions-transition-variants",
+        action="store_true",
+        help="Build Phase 14 theory-structured emissions-transition variant diagnostics.",
+    )
+    parser.add_argument(
+        "--compare-multiyear-base-models",
+        action="store_true",
+        help="Compare available default and calibrated-historical multi-year base outputs.",
+    )
+    parser.add_argument(
+        "--diagnose-transition-rule-tradeoffs",
+        action="store_true",
+        help="Build Phase 16 transition-rule error decomposition and sign-failure diagnostics.",
+    )
+    parser.add_argument(
+        "--diagnose-high-emissions-dampening",
+        action="store_true",
+        help="Build Phase 17 high-emissions node and readiness-dampening diagnostics.",
+    )
+    parser.add_argument(
+        "--audit-electricity-data",
+        action="store_true",
+        help="Build Phase 18 electricity and China EI data audit diagnostics.",
+    )
     parser.add_argument("--calibration-random-search-iterations", type=int, default=200)
     parser.add_argument("--calibration-seed", type=int, default=42)
     parser.add_argument("--calibration-train-end-year", type=int, default=2011)
     parser.add_argument("--calibration-validation-start-year", type=int, default=2012)
+    parser.add_argument("--transition-variant-random-search-iterations", type=int, default=100)
+    parser.add_argument("--transition-variant-seed", type=int, default=42)
+    parser.add_argument(
+        "--transition-variant-target",
+        action="append",
+        choices=("one_year_rEI", "smoothed_one_year_rEI", "three_year_rEI"),
+        default=None,
+        help="Target horizon to include in Phase 14. May be supplied multiple times.",
+    )
     parser.add_argument(
         "--historical-production-forcing",
         action=argparse.BooleanOptionalAction,
@@ -536,7 +592,7 @@ def main() -> None:
             historical_summary,
             sector_background,
             frontier_gap_report,
-        ) = updater.build_emissions_update()
+        ) = updater.build_emissions_update(parameter_file=args.emissions_parameter_file)
         updater.write_outputs(
             panel,
             report,
@@ -613,6 +669,8 @@ def main() -> None:
             config=config,
             historical_production_forcing=args.historical_production_forcing,
             reuse_existing=args.reuse_existing,
+            emissions_transition_mode=args.emissions_transition_mode,
+            emissions_parameter_file=args.emissions_parameter_file,
         )
         result = simulator.run()
         simulator.write_outputs(result)
@@ -621,9 +679,17 @@ def main() -> None:
         print(f"Years: {validation_row['simulation_start_year']}-{validation_row['simulation_end_year']}")
         print(f"Status: {validation_row['status']}")
         print(f"Historical production forcing: {validation_row['historical_production_forcing']}")
-        print(f"State panel: {paths.base_multiyear_state_panel_path}")
-        print(f"Summary panel: {paths.base_multiyear_summary_panel_path}")
-        print(f"Validation report: {paths.base_multiyear_validation_report_path}")
+        if args.emissions_transition_mode == "historical_frontier_gap_only":
+            print(f"State panel: {paths.base_multiyear_state_panel_historical_frontier_gap_path}")
+            print(f"Summary panel: {paths.base_multiyear_summary_panel_historical_frontier_gap_path}")
+            print(
+                "Validation report: "
+                f"{paths.base_multiyear_validation_report_historical_frontier_gap_csv_path}"
+            )
+        else:
+            print(f"State panel: {paths.base_multiyear_state_panel_path}")
+            print(f"Summary panel: {paths.base_multiyear_summary_panel_path}")
+            print(f"Validation report: {paths.base_multiyear_validation_report_path}")
         return
 
     if args.validate_multiyear_base:
@@ -667,6 +733,107 @@ def main() -> None:
         print(f"Validation bias: {validation['bias']}")
         print(f"Best parameters: {paths.emissions_best_parameters_path}")
         print(f"Calibration report: {paths.emissions_calibration_report_path}")
+        return
+
+    if args.diagnose_emissions_hypotheses:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--diagnose-emissions-hypotheses requires --create-output-dirs to write validation outputs."
+            )
+        diagnostics = EmissionsTransitionHypothesisDiagnostics(
+            paths=paths,
+            start_year=config.start_year,
+            end_year=config.end_year,
+            config=config.emissions,
+        )
+        result = diagnostics.run()
+        diagnostics.write_outputs(result)
+        print("Built ABM v4 emissions-transition hypothesis diagnostics.")
+        print(f"Hypotheses tested: {result.hypothesis_diagnosis.height}")
+        print(f"Diagnosis table: {paths.emissions_hypothesis_diagnosis_path}")
+        print(f"Diagnostic report: {paths.emissions_hypothesis_diagnostic_report_path}")
+        return
+
+    if args.compare_emissions_transition_variants:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--compare-emissions-transition-variants requires --create-output-dirs to write validation outputs."
+            )
+        comparator = EmissionsTransitionVariantComparator(
+            paths=paths,
+            start_year=config.start_year,
+            end_year=config.end_year,
+            config=config.emissions,
+            random_search_iterations=args.transition_variant_random_search_iterations,
+            seed=args.transition_variant_seed,
+            targets=args.transition_variant_target,
+        )
+        result = comparator.run()
+        comparator.write_outputs(result)
+        recommendation = result.recommendation.to_dicts()[0]
+        print("Built ABM v4 emissions-transition variant comparison diagnostics.")
+        print(f"Variants compared: {result.results.height}")
+        print(f"Recommended variant: {recommendation['recommended_model_variant']}")
+        print(f"Recommended target: {recommendation['recommended_target']}")
+        print(f"Recommended frontier: {recommendation['recommended_frontier']}")
+        print(f"Results table: {paths.emissions_transition_variant_results_path}")
+        print(f"Recommendation table: {paths.emissions_transition_variant_recommendation_path}")
+        print(f"Variant report: {paths.emissions_transition_variant_report_path}")
+        return
+
+    if args.compare_multiyear_base_models:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--compare-multiyear-base-models requires --create-output-dirs to write validation outputs."
+            )
+        comparison, markdown = build_multiyear_base_model_comparison(paths)
+        write_multiyear_base_model_comparison(paths, comparison, markdown)
+        print("Built ABM v4 multi-year base model comparison.")
+        print(f"Compared variants: {comparison.height}")
+        print(f"Comparison CSV: {paths.multiyear_base_model_comparison_csv_path}")
+        print(f"Comparison Markdown: {paths.multiyear_base_model_comparison_md_path}")
+        return
+
+    if args.diagnose_transition_rule_tradeoffs:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--diagnose-transition-rule-tradeoffs requires --create-output-dirs to write validation outputs."
+            )
+        diagnostics = TransitionRuleTradeoffDiagnostics(paths)
+        result = diagnostics.run()
+        diagnostics.write_outputs(result)
+        print("Built ABM v4 transition-rule tradeoff diagnostics.")
+        print(f"Comparison rows: {result.sign_failure_panel.height}")
+        print(f"Hypotheses tested: {result.hypothesis_tests.height}")
+        print(f"Tradeoff report: {paths.transition_rule_error_tradeoff_report_path}")
+        return
+
+    if args.diagnose_high_emissions_dampening:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--diagnose-high-emissions-dampening requires --create-output-dirs to write validation outputs."
+            )
+        diagnostics = HighEmissionsDampeningDiagnostics(paths)
+        result = diagnostics.run()
+        diagnostics.write_outputs(result)
+        recommendation = result.recommendation.to_dicts()[0]
+        print("Built ABM v4 high-emissions dampening diagnostics.")
+        print(f"Recommendation: {recommendation['recommendation']}")
+        print(f"Concentration rows: {result.concentration.height}")
+        print(f"Phase 17 report: {paths.phase17_high_emissions_dampening_report_path}")
+        return
+
+    if args.audit_electricity_data:
+        if not args.create_output_dirs:
+            raise SystemExit("--audit-electricity-data requires --create-output-dirs to write validation outputs.")
+        audit = ElectricityDataAudit(paths=paths, start_year=config.start_year, end_year=config.end_year)
+        result = audit.run()
+        audit.write_outputs(result)
+        recommendation = result.recommendation.to_dicts()[0]
+        print("Built ABM v4 electricity and China EI data audit.")
+        print(f"Recommendation: {recommendation['recommended_next_action']}")
+        print(f"Electricity nodes: {result.inventory.height}")
+        print(f"Phase 18 report: {paths.electricity_data_audit_report_path}")
         return
 
     if args.create_output_dirs:

@@ -1143,6 +1143,460 @@ Conclusion:
 - It is not strong enough yet for a calibrated historical simulation intended to support scenarios.
 - Next recommended step: improve the calibration design before scenarios, especially by revisiting sector background trends, feature scaling, capability contribution, and sign-prediction performance.
 
+## Phase 13 Emissions-Transition Hypothesis Diagnostics
+
+Phase 13 tests why the Phase 12 frontier-gap readiness calibration remained weak. It does not recalibrate parameters, does not overwrite `config.py`, and does not create scenarios.
+
+Outputs created:
+
+- `data/abm_v4/validation/emissions_hypothesis_diagnosis.csv`
+- `data/abm_v4/validation/emissions_target_horizon_panel.parquet`
+- `data/abm_v4/validation/emissions_target_horizon_summary.csv`
+- `data/abm_v4/validation/emissions_predictor_screening.csv`
+- `data/abm_v4/validation/emissions_sector_dominance_diagnostics.csv`
+- `data/abm_v4/validation/emissions_capability_source_diagnostics.csv`
+- `data/abm_v4/validation/emissions_readiness_threshold_diagnostics.csv`
+- `data/abm_v4/validation/emissions_frontier_specification_diagnostics.csv`
+- `data/abm_v4/validation/emissions_macro_shock_diagnostics.csv`
+- `data/abm_v4/validation/emissions_hypothesis_diagnostic_report.md`
+
+Hypothesis diagnosis:
+
+| Hypothesis | Evidence | Key metric | Interpretation | Recommended next action |
+| --- | --- | ---: | --- | --- |
+| H1 annual rEI is too noisy | mixed / weak | best horizon improvement = -0.009313617186632178 | Medium-run and smoothed targets reduce volatility, but simple readiness still does not beat sector background. | Do not switch target solely on this evidence; keep testing medium-run targets after model-form revisions. |
+| H2 sector background dominates | supports / moderate | share sectors readiness improves = 0.037037037037037035 | Readiness improves only a very small sector subset. | Consider sector-family-specific transition rules. |
+| H3 capability variables are weakly measured | supports / moderate | atlas minus IO MAE = -0.009104914304675249 | Atlas-observed capability performs better than IO-imputed, but neither capability slice makes readiness beat background. | Keep IO as integration proxy; calibrate capability effects by source. |
+| H4 readiness may be nonlinear / threshold-based | mixed / weak | top minus bottom readiness target = -0.09780874342283331 | Smooth readiness quantiles do not show the expected ordering. | Test threshold/regime readiness only after revisiting feature scaling and sector rules. |
+| H5 frontier gap may be misspecified | supports / moderate | best frontier gap-only MAE = 0.17675152898102478 | `sector_year_p50` performs best among frontier diagnostics, better than current p25 frontier. | Revise frontier definition only if p50/rolling alternatives remain interpretable and robust. |
+| H6 macro/country-year shocks matter | supports / moderate | yearly mean residual std = 0.04787639260451795 | Residuals vary meaningfully by year; 2015 has high volatility and large residuals. | Add year or country-year controls for calibration diagnostics only. |
+
+Target horizon evidence:
+
+| Target | Rows | Std | Readiness corr. | Cap corr. | GCap corr. | Background MAE | Readiness MAE | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| one_year_rEI | 96,803 | 0.23872023216162916 | -0.04448882524992794 | 0.005888508151245079 | 0.0021873977919163053 | 0.17160804516253236 | 0.18092166234916454 | -0.009313617186632178 |
+| three_year_rEI | 87,533 | 0.1256427540537762 | -0.05893680560894731 | 0.031130504956638626 | 0.008894030530032912 | 0.10992635474204364 | 0.1209496515858761 | -0.011023296843832464 |
+| five_year_rEI | 78,268 | 0.09672060194300613 | -0.07746157324226308 | 0.045207390357283765 | 0.011143220950118354 | 0.09792056131477417 | 0.10916267431508889 | -0.011242113000314718 |
+| smoothed_one_year_rEI | 87,533 | 0.12564275405377623 | -0.014159717189548438 | 0.03196125744237969 | 0.010871365956658819 | 0.09436578246879966 | 0.10551911890735968 | -0.011153336438560021 |
+| winsorized_one_year_rEI | 96,803 | 0.19149708191304704 | -0.04444471019560394 | 0.009239282136952584 | 0.0063095343561262625 | 0.15186872964667095 | 0.16118234683330313 | -0.009313617186632178 |
+
+Interpretation:
+
+- Medium-run and smoothed targets are less volatile than one-year rEI.
+- However, the simple readiness predictor still underperforms sector background for all tested target definitions.
+- H1 is therefore not sufficient by itself. Annual noise exists, but model form and sector structure remain larger issues.
+
+Sector dominance:
+
+- Readiness improves over background in only about 3.7% of sectors.
+- Most major sectors show `sector background dominates`.
+- This is the strongest explanation for the Phase 12 failure: a single global readiness equation is too blunt for heterogeneous sectoral transition pathways.
+
+Capability measurement:
+
+| Capability type | Source | Rows | Readiness corr. | Capability corr. | Background MAE | Readiness MAE | Improvement |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| general | atlas_observed | 11,351 | -0.10069767390255496 | -0.04413947433184798 | 0.16783671713306222 | 0.1768293004696207 | -0.008992583336558474 |
+| general | io_imputed | 5,904 | -0.15186993146866518 | -0.08752217390518062 | 0.17610030920332573 | 0.18593421477429595 | -0.00983390557097022 |
+| general | unavailable | 1,228 | -0.10984773374684147 |  | 0.18487027445053855 | 0.19464991167874646 | -0.009779637228207905 |
+| green | atlas_observed | 11,351 | -0.10069767390255496 | -0.033282400781671904 | 0.16783671713306222 | 0.1768293004696207 | -0.008992583336558474 |
+| green | io_imputed | 5,108 | -0.1636472965851533 | 0.011387689876767478 | 0.17848595472673298 | 0.18834127332578238 | -0.009855318599049395 |
+| green | unavailable | 2,024 | -0.07572665068787472 |  | 0.1754005265896958 | 0.1851474661170196 | -0.009746939527323806 |
+
+Interpretation:
+
+- Atlas-observed nodes perform better than IO-imputed nodes, but readiness still underperforms background in both groups.
+- IO-imputed capability remains acceptable for integration coverage, not for strong calibration claims.
+- Capability measurement alone does not explain the weak calibration; the readiness equation and sector structure need revision.
+
+Frontier specification:
+
+| Frontier | Target correlation | Gap-only MAE | Readiness-gated MAE | Mean gap | Share zero gap |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| sector_year_p50 | 0.1083919940783424 | 0.17675152898102478 | 0.1757864974659121 | 0.4076550049396943 | 0.505275117675702 |
+| rolling_sector_p25 | 0.11254897334818942 | 0.1794337375163404 | 0.1780291501860581 | 0.5772190794956281 | 0.36330682248552726 |
+| sector_year_p25 | 0.11230079413291275 | 0.18282101186705138 | 0.18092316605216316 | 0.78646069559454 | 0.2533679597467943 |
+| rolling_sector_p10 | 0.11380124636200858 | 0.18661770579235973 | 0.1841379212192752 | 1.0661957212418716 | 0.16398853000054103 |
+| sector_year_p10 | 0.11294494374262891 | 0.18966402728848045 | 0.18673428618576873 | 1.3127919367899328 | 0.10685494778986096 |
+
+Interpretation:
+
+- The current p25 frontier is probably too aggressive or too noisy for historical annual calibration.
+- The p50 frontier improves simple frontier diagnostics and creates a more conservative feasible benchmark.
+- This does not prove p50 is final, but it is a concrete candidate for the next diagnostic calibration round.
+
+Macro/country-year shocks:
+
+- Year-level residuals vary meaningfully, with yearly mean residual standard deviation of 0.04787639260451795.
+- 2015 shows especially high target volatility and mean absolute residual.
+- Historical calibration diagnostics likely need year or country-year controls to separate shocks from structural transition readiness.
+
+Most likely explanation for Phase 12 weakness:
+
+1. Sectoral transition pathways dominate a single global readiness equation.
+2. The current p25 frontier is probably not the best feasible benchmark.
+3. Annual rEI is noisy, but smoothing or medium horizons alone do not make readiness empirically active.
+4. Capability measurement matters, especially Atlas versus IO-imputed, but measurement error is not the only problem.
+5. Macro/year shocks contaminate annual calibration and should be controlled diagnostically, not built directly into scenario rules.
+
+Recommended next modelling action:
+
+- Build a Phase 14 diagnostic calibration variant using sector-family-specific rules, a conservative p50 or rolling frontier benchmark, and optional historical year/country-year controls for calibration diagnostics.
+- Keep scenarios paused.
+- Do not treat current readiness parameters as scenario-ready.
+
+## Phase 14 Theory-Structured Transition Variant Comparison
+
+Phase 14 compares emissions-transition rule structures. It is not a policy scenario phase, does not change production dynamics, does not overwrite `config.py`, and does not create projection outputs.
+
+Outputs created:
+
+- `data/abm_v4/validation/emissions_transition_variant_results.csv`
+- `data/abm_v4/validation/emissions_transition_variant_by_sector_family.csv`
+- `data/abm_v4/validation/emissions_transition_variant_by_capability_source.csv`
+- `data/abm_v4/validation/emissions_transition_variant_best_parameters.json`
+- `data/abm_v4/validation/emissions_transition_variant_recommendation.csv`
+- `data/abm_v4/validation/emissions_transition_variant_report.md`
+
+Variants tested:
+
+- `sector_background_only`
+- `sector_background_plus_year_country_controls`, marked diagnostics only
+- `frontier_gap_only`
+- `global_frontier_gap_readiness`
+- `sector_family_frontier_gap_readiness`
+- `gated_readiness_by_sector_signal`
+- `readiness_without_capability`
+- `capability_only_readiness`
+
+Target horizons tested:
+
+- Phase 13 identified `one_year_rEI` as the clear target in the H1 diagnosis, so the default Phase 14 run used `one_year_rEI`.
+- The CLI can also run `smoothed_one_year_rEI` and `three_year_rEI` through repeated `--transition-variant-target` arguments.
+
+Frontier variants tested:
+
+- `sector_year_p25`
+- `sector_year_p50`
+- `rolling_sector_p25`
+- `rolling_sector_p50`
+
+Recommendation table:
+
+| Recommended model | Target | Frontier | Validation MAE | Improvement over sector background pct | Wrong-sign share | Correlation | Interpretation |
+| --- | --- | --- | ---: | ---: | ---: | ---: | --- |
+| `frontier_gap_only` | `one_year_rEI` | `rolling_sector_p50` | 0.1716668017183566 | -0.00034238811920846564 | 0.5366012011037169 | -0.013911549273459793 | Readiness variants do not beat sector background; keep a conservative sector-background plus frontier-gap historical rule. |
+
+Main findings:
+
+- The diagnostic year/country control variant improves validation MAE to 0.16033900149809427 and lowers wrong-sign share to 0.41411026348536495, confirming that historical rEI is shock-sensitive. These controls are not future scenario mechanisms.
+- Sector-family readiness does not clear the 5% improvement rule; its best validation MAE is essentially tied with, and slightly worse than, sector background.
+- Gated readiness does not improve over sector background in the default Phase 14 comparison.
+- Capability-only readiness does not outperform background, so capability terms should not yet be treated as a calibrated historical EI mechanism.
+- `p50` frontier variants are more conservative than `p25`; the best non-control conservative diagnostic is `rolling_sector_p50`, but it still does not beat sector background.
+- Readiness should be deferred to selected sectors or later scenario hypotheses until stronger historical evidence appears.
+- Scenarios remain premature.
+
+Recommended Phase 15:
+
+- Validate a conservative historical transition rule in a multi-year base run: sector background plus a cautiously specified frontier gap.
+- Keep readiness available as a diagnostic or selected-sector scenario mechanism, not as a global calibrated historical mechanism.
+- Keep historical year/country controls confined to diagnostics.
+- Revisit sector-family mapping and frontier definitions only after checking whether the conservative rule improves multi-year EI and emissions validation.
+
+## Phase 15 Calibrated-Historical Frontier-Gap Base Validation
+
+Phase 15 applies the Phase 14 recommendation as an explicit historical emissions-transition mode. This is not a scenario phase, does not remove historical production forcing, does not rebuild raw-T edges, and does not overwrite the active default `config.py` emissions transition.
+
+Named historical mode:
+
+- `historical_frontier_gap_only`
+
+Equation:
+
+```text
+rEI_{i,t+1} =
+  alpha_sector_background_{s,t}
+  + rho_gap * Gap_EI_{i,t} / (Gap_EI_{i,t} + tau_gap)
+
+Gap_EI_{i,t} =
+  max(0, log(EI_{i,t}) - log(EI_frontier_{s,t}))
+```
+
+Rolling frontier definition:
+
+- `EI_frontier_{s,t}` is the rolling sector p50 frontier using positive EI observations in sector `s` up to year `t`.
+- The rolling frontier does not use future years.
+- Readiness, capability, network exposure, brown centrality, and supplier lock-in do not enter `rEI_used` in this historical base rule.
+
+Parameters used:
+
+| Parameter | Value | Source |
+| --- | ---: | --- |
+| `rho_gap` | 0.03177485903146337 | `data/abm_v4/validation/emissions_transition_variant_best_parameters.json` |
+| `tau_gap` | 1.8570918527926128 | `data/abm_v4/validation/emissions_transition_variant_best_parameters.json` |
+
+The parameter source reported by the run is `phase14_global_parameters:one_year_rEI|rolling_sector_p50`. Fallback parameters were not used in the full manual validation run. If the file is missing or malformed, the implemented fallback is `rho_gap = 0.03` and `tau_gap = 1.0`, and that fallback is reported in outputs rather than written to `config.py`.
+
+Outputs created:
+
+- `data/abm_v4/simulations/base_multiyear_state_panel_historical_frontier_gap.parquet`
+- `data/abm_v4/simulations/base_multiyear_summary_panel_historical_frontier_gap.csv`
+- `data/abm_v4/diagnostics/base_multiyear_yearly_diagnostics_historical_frontier_gap.csv`
+- `data/abm_v4/validation/base_multiyear_validation_report_historical_frontier_gap.csv`
+- `data/abm_v4/validation/base_multiyear_validation_report_historical_frontier_gap.md`
+- `data/abm_v4/validation/multiyear_base_model_comparison.csv`
+- `data/abm_v4/validation/multiyear_base_model_comparison.md`
+
+Comparison with the previous `frontier_gap_readiness` base:
+
+| Model | Latest aggregate emissions pct error | Mean yearly aggregate emissions pct error | Mean log EI error | rEI MAE | Wrong-sign share | Status |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `frontier_gap_readiness` | 0.7804703868079855 | 0.4081294910805779 | 0.11812465009461429 | 0.14238925439963335 | 0.28364297295343527 | warning |
+| `historical_frontier_gap_only` | 0.8545175626056115 | 0.570628904824899 | 0.11251959786407684 | 0.14054253111602777 | 0.3829323471380019 | warning |
+
+Interpretation:
+
+- The calibrated-historical conservative rule slightly improves mean log EI error and rEI MAE.
+- It worsens latest aggregate emissions pct error and mean yearly aggregate emissions pct error.
+- It also worsens wrong-sign share.
+- Sector-background dominance remains; the frontier-gap term alone is not enough to make the historical base scenario-ready.
+- The model remains not scenario-ready.
+- Historical production forcing remains the central caveat because production is still observed/forced rather than endogenously propagated.
+
+Recommended Phase 16:
+
+- Diagnose why improved rEI MAE does not translate into improved aggregate emissions validation.
+- Compare aggregate-weighted losses against node-average rEI losses before choosing a calibrated historical objective.
+- Inspect high-emissions sectors and countries driving the worsened aggregate emissions error.
+- Keep readiness deferred and keep scenarios paused until the historical base improves on both transition and aggregate emissions metrics.
+
+## Phase 16 Transition Rule Error Decomposition and Sign-Failure Diagnosis
+
+Phase 16 decomposes the Phase 15 tradeoff between the previous `frontier_gap_readiness` multi-year base and the calibrated-historical `historical_frontier_gap_only` base. It does not run scenarios, does not recalibrate parameters, does not rerun simulations, does not change production dynamics, and does not overwrite `config.py`.
+
+Outputs created:
+
+- `data/abm_v4/validation/transition_rule_error_decomposition.csv`
+- `data/abm_v4/validation/transition_rule_sign_failure_panel.parquet`
+- `data/abm_v4/validation/transition_rule_sign_failure_by_year.csv`
+- `data/abm_v4/validation/transition_rule_sign_failure_by_sector.csv`
+- `data/abm_v4/validation/transition_rule_sign_failure_by_country.csv`
+- `data/abm_v4/validation/transition_rule_sign_failure_by_ecosystem.csv`
+- `data/abm_v4/validation/transition_rule_sign_failure_by_capability_source.csv`
+- `data/abm_v4/validation/transition_rule_sign_failure_by_decile.csv`
+- `data/abm_v4/validation/transition_rule_aggregate_contribution.csv`
+- `data/abm_v4/validation/transition_rule_hypothesis_tests.csv`
+- `data/abm_v4/validation/transition_rule_error_tradeoff_report.md`
+
+Hypotheses tested:
+
+- H1: frontier-gap-only behaves like a mean-reversion rule.
+- H2: readiness was acting as a shrinkage mechanism.
+- H3: the selected metric optimized the wrong objective.
+- H4: rolling p50 frontier is better for average nodes but worse for central nodes.
+- H5: annual direction is shock-dominated, but magnitude is structurally predictable.
+- H6: sector background is doing most of the economic work.
+- H7: the frontier definition is still incomplete.
+- H8: capability/readiness should be conditional, not global.
+- H9: IO-imputed capability is not the main issue here.
+- H10: historical production forcing may amplify EI errors into emissions errors.
+
+Weighted transition diagnostics:
+
+| Model | Unweighted rEI MAE | Output-weighted rEI MAE | Emissions-weighted rEI MAE | Unweighted wrong-sign share | Output-weighted wrong-sign share | Emissions-weighted wrong-sign share | Mean emissions abs error |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `frontier_gap_readiness` | 0.14238925439963335 | 0.08662781800820019 | 0.13075200431187453 | 0.5373387188413582 | 0.5349882938490472 | 0.37720451217258033 | 4788.881392014762 |
+| `historical_frontier_gap_only` | 0.14054253111602774 | 0.08506103151203555 | 0.12994752782968327 | 0.3829323471380019 | 0.3536402339130191 | 0.3381510086061846 | 5865.019607938777 |
+
+Interpretation:
+
+- `historical_frontier_gap_only` is better on unweighted, output-weighted, and emissions-weighted rEI MAE in the direct transition panel.
+- The direct transition panel also gives `historical_frontier_gap_only` better wrong-sign shares. This is more nuanced than the Phase 15 headline comparison and shows that sign conclusions depend on the exact transition panel and weighting definition.
+- Despite better transition metrics, `historical_frontier_gap_only` worsens emissions absolute error and aggregate emissions fit.
+- The aggregate emissions worsening is concentrated in a small number of large high-emissions nodes, especially `Electricity, Gas and Water`.
+
+Top aggregate worsening drivers:
+
+- The top 20 node-years explain 36.4% of the positive aggregate emissions-error deterioration.
+- The largest contributors are overwhelmingly `Electricity, Gas and Water`.
+- China electricity and water node-years from 2001-2015 dominate the top ranks, followed by USA electricity and water node-years and one Russia electricity and water node-year.
+- The largest single contributor is `CHN | CHN | Commodities | Electricity, Gas and Water` in 2011, with an added absolute emissions-error difference of about 4.55 million.
+
+Sector and country concentration:
+
+- `Electricity, Gas and Water` accounts for about 38.8% of observed emissions in the transition panel and about 73.3% of the aggregate error deterioration.
+- The next largest sector contributions are `Electrical and Machinery`, `Petroleum, Chemical and Non-Metallic Mineral Products`, `Construction`, and `Metal Products`.
+- China accounts for about 21.4% of observed emissions but about 66.5% of aggregate error deterioration.
+- USA and Russia are the next largest country contributors.
+- Some countries, including Poland and India, show the pattern `magnitude improves but sign worsens`, but this is not the dominant aggregate pattern.
+
+Capability-source diagnosis:
+
+- Capability-source differences are small for the frontier-gap-only rule.
+- H9 is supported: capability source remains a useful slice, but the Phase 15 aggregate problem is not primarily a direct IO-imputed capability problem because the historical frontier-gap-only rule does not use capability terms.
+
+Hypothesis evidence:
+
+| Hypothesis | Evidence strength | Supports? | Key metric | Interpretation |
+| --- | --- | --- | ---: | --- |
+| H1 mean reversion | strong | yes | 0.6282338342010845 | Frontier-gap-only wrong signs often occur where nodes have positive gap but observed rEI is negative. |
+| H2 readiness shrinkage | weak | no | -0.02949852507374634 | Low-readiness nodes do not explain frontier-gap-only sign failures in this diagnostic. |
+| H3 wrong objective | moderate | yes | -0.010595003286344468 | Weighted and unweighted objectives differ enough that model selection should include weighted metrics. |
+| H4 p50 worse for central nodes | weak | no | -0.0009462283265040863 | Top-output decile does not show larger rEI deterioration, though aggregate emissions deterioration is concentrated in large nodes. |
+| H5 annual shocks | moderate | yes | 0.19296147452962467 | Wrong-sign shares cluster by year/country. |
+| H6 sector background dominance | weak | no | -0.001522359355262775 | Best-readiness sectors are not clearly worsened by the frontier term. |
+| H7 incomplete frontier | weak | no | 0.1953376124299678 | Sector concentration exists but is not enough alone to establish frontier incompleteness. |
+| H8 conditional readiness | weak | no | 0.0 | Readiness does not beat gap-only by sector in this transition panel. |
+| H9 IO capability not main issue | moderate | yes | 0.004219631906933863 | Capability-source sign differences are small. |
+| H10 production forcing amplification | weak | no | 0.3640640143979693 | Top 20 node-years matter substantially but do not exceed the strong concentration threshold. |
+
+Main diagnosis:
+
+- Phase 15 was mixed because node-average transition metrics and aggregate emissions metrics point in different directions.
+- The conservative frontier-gap-only rule improves average transition fit, but it worsens emissions fit in systemically important high-emissions electricity nodes.
+- The issue is less a broad sign failure and more an aggregation/weighting and large-node sensitivity problem.
+- The p50 frontier is not enough for large electricity-system nodes.
+- Historical production forcing amplifies EI errors into aggregate emissions errors because observed production scale is multiplied directly by simulated EI.
+
+Recommended Phase 17:
+
+- Do not implement scenarios.
+- Do not adopt `historical_frontier_gap_only` as the default yet.
+- Build a validation-objective diagnostic that compares unweighted rEI MAE, output-weighted rEI MAE, emissions-weighted rEI MAE, wrong-sign share, and aggregate emissions error.
+- Add a high-emissions-node diagnostic for electricity and other large contributors before testing any hybrid rule.
+- Only after that, test a weak dampened frontier-gap hybrid as a diagnostic candidate, not as a default.
+
+## Phase 17 High-Emissions Node and Readiness-Dampening Diagnosis
+
+Phase 17 focuses on the Phase 16 conflict without running scenarios, recalibrating, changing parameters, changing production dynamics, or implementing a hybrid rule. It reads the Phase 16 transition-rule comparison panel and decomposes whether the aggregate emissions deterioration is concentrated in high-emissions nodes and whether the previous readiness rule acted as a dampener.
+
+Implemented diagnostics:
+
+- `HighEmissionsDampeningDiagnostics` in `src/abm_v4/validation.py`.
+- CLI flag: `--diagnose-high-emissions-dampening`.
+- Output paths are defined under `ABMV4Paths` and are written only when `--create-output-dirs` is provided.
+- The diagnostic uses existing Phase 16 outputs and fails with an actionable message if `transition_rule_sign_failure_panel.parquet` is missing.
+
+Outputs written:
+
+- `data/abm_v4/validation/high_emissions_concentration_diagnostic.csv`
+- `data/abm_v4/validation/electricity_sector_dampening_diagnostic.csv`
+- `data/abm_v4/validation/china_electricity_transition_diagnostic.csv`
+- `data/abm_v4/validation/readiness_dampening_diagnostic.csv`
+- `data/abm_v4/validation/simplified_model_selection_tradeoff.csv`
+- `data/abm_v4/validation/phase17_recommendation.csv`
+- `data/abm_v4/validation/phase17_high_emissions_dampening_report.md`
+
+High-emissions concentration results:
+
+- Electricity, Gas and Water accounts for about 38.8% of observed emissions in the Phase 16 node-year panel and about 61.4% of positive aggregate deterioration under `historical_frontier_gap_only`.
+- China (`CHN`) accounts for about 21.4% of observed emissions and about 50.0% of positive aggregate deterioration.
+- The top 10 node-years account for about 27.5% of positive deterioration; the top 20 account for about 36.4%; the top 50 account for about 48.9%.
+- The concentration is therefore real, but not just a single node-year outlier.
+
+Electricity-sector results:
+
+- Electricity nodes have lower direct transition wrong-sign share under `historical_frontier_gap_only` than under `frontier_gap_readiness` in the recomputed Phase 16 panel.
+- Their aggregate emissions error is worse under `historical_frontier_gap_only`: about 269.7 million absolute emissions-error units versus about 193.4 million for `frontier_gap_readiness`.
+- The largest positive deterioration rows are repeatedly China Electricity, Gas and Water in 2006-2015.
+
+China and China-electricity results:
+
+- China-level emissions error is worse under `historical_frontier_gap_only`: about 261.0 million versus about 191.7 million for `frontier_gap_readiness`.
+- China Electricity, Gas and Water is the dominant recurring node in the top deterioration rows.
+- In several China electricity years, `historical_frontier_gap_only` moves simulated rEI closer to observed rEI, but still worsens absolute emissions error because the node is very large and production is historically forced.
+- In other years with observed negative rEI, both rules predict improvement, and `historical_frontier_gap_only` is more aggressive.
+
+Readiness dampening results:
+
+- Across all node-years, `historical_frontier_gap_only` is more aggressive than `frontier_gap_readiness` about 67.8% of the time.
+- The mean dampening amount is about 0.017 rEI units overall.
+- For Electricity, Gas and Water, the mean dampening amount is about 0.0149 and `historical_frontier_gap_only` is more aggressive about 61.2% of the time.
+- For China, the mean dampening amount is about 0.0078 and `historical_frontier_gap_only` is more aggressive about 56.6% of the time.
+- This supports the interpretation that readiness partly acted as a dampener, but the main issue is the interaction between high-emissions nodes and aggregate validation, not a universal transition-sign failure.
+
+Simplified model-selection tradeoff:
+
+- `historical_frontier_gap_only` wins unweighted, output-weighted, and emissions-weighted rEI MAE.
+- `historical_frontier_gap_only` also wins recomputed unweighted, output-weighted, and emissions-weighted wrong-sign shares in the Phase 16 transition panel.
+- `frontier_gap_readiness` wins latest-year aggregate emissions pct error, mean yearly aggregate emissions pct error, high-emissions-node emissions error, electricity-sector emissions error, and China emissions error.
+
+Phase 17 recommendation:
+
+- Recommendation: `inspect_electricity_data_before_hybrid`.
+- Evidence: electricity deterioration share is about 0.614, China deterioration share is about 0.500, and the top 10 node-years account for about 0.275 of positive deterioration.
+- Phase 18 should inspect the China electricity data path and EI series before adding a new mechanism.
+- After that inspection, a dampened frontier-gap hybrid remains a plausible diagnostic candidate, but it should not be implemented as the default yet.
+- Scenarios remain premature because no rule yet performs acceptably on both average transition metrics and high-emissions aggregate metrics.
+
+## Phase 18 Electricity and China EI Data Audit
+
+Phase 18 audits the electricity and China EI data behind the Phase 17 high-emissions deterioration. It does not run scenarios, recalibrate parameters, implement a hybrid rule, change production dynamics, overwrite `config.py`, or modify v1/v2/v3 sources.
+
+Implemented audit:
+
+- `ElectricityDataAudit` in `src/abm_v4/validation.py`.
+- CLI flag: `--audit-electricity-data`.
+- Output paths are defined under `ABMV4Paths` and are written only when `--create-output-dirs` is provided.
+- The audit reads the ABM v4 observed state panel, the previous `frontier_gap_readiness` multi-year state panel, the `historical_frontier_gap_only` state panel, and Phase 16/17 diagnostic outputs when available.
+
+Outputs written:
+
+- `data/abm_v4/validation/electricity_node_inventory.csv`
+- `data/abm_v4/validation/china_electricity_observed_series_audit.csv`
+- `data/abm_v4/validation/china_electricity_model_series_audit.csv`
+- `data/abm_v4/validation/electricity_anomaly_flags.csv`
+- `data/abm_v4/validation/electricity_cross_country_comparison.csv`
+- `data/abm_v4/validation/electricity_data_audit_recommendation.csv`
+- `data/abm_v4/validation/electricity_data_audit_report.md`
+
+Electricity inventory:
+
+- The audit identifies 189 electricity-like ABM v4 nodes using case-insensitive sector matching for electricity, gas, water, utilities, and power labels.
+- China Electricity, Gas and Water is clearly identified as `CHN | CHN | Commodities | Electricity, Gas and Water`.
+- China is the largest electricity-like node by total observed emissions in the audit window, with about 78.8 million observed emissions units and 22 years available.
+- The next largest nodes are USA, Russia, India, Japan, Germany, South Africa, Saudi Arabia, Korea, and Poland.
+
+China electricity observed data audit:
+
+- China electricity has unusually high EI relative to the electricity sector early in the sample: its sector-year EI percentile is near the top of the electricity distribution from the late 1990s through the 2000s.
+- Its gap to the rolling sector p50 frontier is very large early in the sample, about 2.14 log points in 1995, and remains positive through 2016.
+- Observed EI falls sharply over several periods while observed production rises sharply, so aggregate emissions can rise even when EI improves.
+- Large observed production jumps appear in 1998, 2005, and 2007.
+- Large observed EI log-change flags appear in 1998, 2005, and 2007.
+- Large observed emissions jump flags appear around 2002, 2003, and 2006.
+
+Anomaly flags:
+
+- Active focused-audit flags include 43 sign-reversal flags, 21 model-disagreement flags, 4 EI jump flags, 4 production jump flags, 4 emissions jump flags, and 4 extreme frontier-gap flags.
+- For China electricity specifically, the severe audit count used by the recommendation logic is 9.
+- There are no non-positive or missing EI flags in the focused China electricity audit, so the issue is not a simple missingness or invalid-level failure.
+- The evidence instead points to structural breaks, accounting/composition shifts, or a sector-specific electricity transition path.
+
+Cross-country electricity comparison:
+
+- China electricity accounts for about 25.5% of observed emissions among electricity-like nodes in the cross-country comparison.
+- China has mean observed EI of about 0.0157 and mean observed rEI of about -0.099 in the audit convention.
+- China has high rEI volatility, about 0.154, and a large mean gap to rolling p50, about 1.24 log points.
+- Both rules have large China electricity transition errors, but `historical_frontier_gap_only` is slightly better on rEI MAE while worse on aggregate emissions error.
+- China electricity emissions error is about 113.6 million under `frontier_gap_readiness` and about 163.7 million under `historical_frontier_gap_only`.
+
+Model behavior diagnosis:
+
+- `historical_frontier_gap_only` often moves China electricity rEI closer to the observed transition magnitude, consistent with the Phase 16 and Phase 17 transition-metric results.
+- However, because China electricity is very large, modest EI simulation differences become large aggregate emissions differences under historical production forcing.
+- Readiness dampening appears relevant, but the data audit shows enough structural and accounting-like breaks that raw data inspection should come before adding a hybrid mechanism.
+
+Phase 18 recommendation:
+
+- Recommendation: `inspect_raw_eora_electricity_data`.
+- Evidence: `severe_china_flags=9`, `over_improve_share=0.500`, and `dampening_help_share=0.455`.
+- Phase 19 should inspect the raw and transformed Eora electricity path for China before testing a dampened frontier-gap hybrid.
+- If the raw data path is clean, then treat electricity as a sector-specific transition case and only then test a weak dampened frontier-gap rule as a diagnostic candidate.
+- Scenarios remain premature.
+
 ## Extension from ABM v3
 
 ABM v4 introduces a separate namespace and output root. It can inspect ABM v3 outputs as preferred inputs, but writes only under `data/abm_v4/` when explicitly run.
@@ -1255,6 +1709,48 @@ Build emissions-transition calibration diagnostics:
 
 ```powershell
 python scripts/run_abm_v4_base.py --calibrate-emissions-transition --create-output-dirs --calibration-random-search-iterations 200
+```
+
+Diagnose why emissions-transition calibration remains weak:
+
+```powershell
+python scripts/run_abm_v4_base.py --diagnose-emissions-hypotheses --create-output-dirs
+```
+
+Compare Phase 14 emissions-transition rule variants:
+
+```powershell
+python scripts/run_abm_v4_base.py --compare-emissions-transition-variants --create-output-dirs --transition-variant-random-search-iterations 100
+```
+
+Run the Phase 15 calibrated-historical frontier-gap base:
+
+```powershell
+python scripts/run_abm_v4_base.py --run-multiyear-base --start-year 1995 --end-year 2016 --create-output-dirs --reuse-existing --emissions-transition-mode historical_frontier_gap_only --emissions-parameter-file data/abm_v4/validation/emissions_transition_variant_best_parameters.json
+```
+
+Compare available multi-year base model outputs:
+
+```powershell
+python scripts/run_abm_v4_base.py --compare-multiyear-base-models --create-output-dirs
+```
+
+Diagnose Phase 16 transition-rule tradeoffs:
+
+```powershell
+python scripts/run_abm_v4_base.py --diagnose-transition-rule-tradeoffs --create-output-dirs
+```
+
+Diagnose Phase 17 high-emissions and readiness-dampening tradeoffs:
+
+```powershell
+python scripts/run_abm_v4_base.py --diagnose-high-emissions-dampening --create-output-dirs
+```
+
+Audit Phase 18 electricity and China EI data:
+
+```powershell
+python scripts/run_abm_v4_base.py --audit-electricity-data --create-output-dirs
 ```
 
 ## Output Root

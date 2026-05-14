@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from pathlib import Path
 
 import polars as pl
 
 from src.abm_v4.config import ABMV4Config
+from src.abm_v4.emissions import (
+    HISTORICAL_FRONTIER_GAP_ONLY_MODE,
+    load_historical_frontier_gap_parameters,
+)
 from src.abm_v4.paths import ABMV4Paths
 from src.abm_v4.state import StateSourceDiagnostic, discover_state_source
 from src.abm_v4.validation import (
@@ -110,11 +115,21 @@ class MultiYearBaseSimulator:
         *,
         historical_production_forcing: bool = True,
         reuse_existing: bool = True,
+        emissions_transition_mode: str | None = None,
+        emissions_parameter_file: Path | str | None = None,
     ) -> None:
         self.paths = paths
         self.config = config
         self.historical_production_forcing = historical_production_forcing
         self.reuse_existing = reuse_existing
+        self.emissions_transition_mode = (
+            emissions_transition_mode or config.emissions.emissions_transition_mode
+        )
+        self.emissions_parameter_file = emissions_parameter_file
+        self.historical_gap_parameters = load_historical_frontier_gap_parameters(
+            emissions_parameter_file
+        )
+        self._state_for_frontiers: pl.DataFrame | None = None
 
     def load_state_panel(self) -> pl.DataFrame:
         """Load the ABM v4 state panel."""
@@ -148,7 +163,9 @@ class MultiYearBaseSimulator:
 
     def run(self) -> MultiYearBaseSimulationResult:
         """Run the historical base simulation over the configured year window."""
-        state = self.load_state_panel().filter(
+        loaded_state = self.load_state_panel()
+        self._state_for_frontiers = loaded_state
+        state = loaded_state.filter(
             pl.col("Year").is_between(self.config.start_year, self.config.end_year)
         )
         if state.is_empty():
@@ -207,6 +224,25 @@ class MultiYearBaseSimulator:
         """Write multi-year base simulation outputs."""
         self.paths.simulations.mkdir(parents=True, exist_ok=True)
         self.paths.diagnostics.mkdir(parents=True, exist_ok=True)
+        self.paths.validation.mkdir(parents=True, exist_ok=True)
+        if self.emissions_transition_mode == HISTORICAL_FRONTIER_GAP_ONLY_MODE:
+            result.state_panel.write_parquet(
+                self.paths.base_multiyear_state_panel_historical_frontier_gap_path
+            )
+            result.summary_panel.write_csv(
+                self.paths.base_multiyear_summary_panel_historical_frontier_gap_path
+            )
+            result.validation_report.write_csv(
+                self.paths.base_multiyear_validation_report_historical_frontier_gap_csv_path
+            )
+            result.yearly_diagnostics.write_csv(
+                self.paths.base_multiyear_yearly_diagnostics_historical_frontier_gap_path
+            )
+            self.paths.base_multiyear_validation_report_historical_frontier_gap_md_path.write_text(
+                self._format_historical_frontier_gap_validation_markdown(result),
+                encoding="utf-8",
+            )
+            return
         result.state_panel.write_parquet(self.paths.base_multiyear_state_panel_path)
         result.summary_panel.write_csv(self.paths.base_multiyear_summary_panel_path)
         result.validation_report.write_csv(self.paths.base_multiyear_validation_report_path)
@@ -222,6 +258,10 @@ class MultiYearBaseSimulator:
             pl.lit(0.0).alias("rEI_used"),
             pl.lit(0.0).alias("ei_gap"),
             pl.lit(None, dtype=pl.Float64).alias("readiness"),
+            pl.lit(self.emissions_transition_mode).alias("emissions_transition_mode"),
+            pl.lit(None, dtype=pl.Float64).alias("historical_rho_gap"),
+            pl.lit(None, dtype=pl.Float64).alias("historical_tau_gap"),
+            pl.lit("").alias("historical_parameter_source"),
             pl.lit(False).alias("bad_transition_node_flag"),
             pl.lit(False).alias("production_constraint_flag"),
             pl.lit(0.0).alias("emissions_decomposition_residual_node"),
@@ -246,7 +286,7 @@ class MultiYearBaseSimulator:
             pl.coalesce(["_cap_prev", "cap_sim"]).alias("_cap_base"),
             pl.coalesce(["_gcap_prev", "gcap_sim"]).alias("_gcap_base"),
         )
-        panel = self._add_frontier_gap_and_readiness(panel)
+        panel = self._add_emissions_transition(panel)
         panel = panel.with_columns(
             pl.when(pl.col("_EI_base") > 0)
             .then(pl.col("_EI_base") * (-pl.col("rEI_used")).exp())
@@ -354,6 +394,70 @@ class MultiYearBaseSimulator:
             self._normalize_expr("_gcap_raw").alias("gcap_sim"),
         )
 
+    def _add_emissions_transition(self, panel: pl.DataFrame) -> pl.DataFrame:
+        if self.emissions_transition_mode == HISTORICAL_FRONTIER_GAP_ONLY_MODE:
+            return self._add_historical_frontier_gap_only(panel)
+        return self._add_frontier_gap_and_readiness(panel)
+
+    def _add_historical_frontier_gap_only(self, panel: pl.DataFrame) -> pl.DataFrame:
+        """Apply Phase 15 sector-background plus rolling p50 frontier-gap transition."""
+        frontier = self._rolling_sector_frontier_for_transition_year(int(panel["year"].max()) - 1)
+        out = panel.join(frontier, on="Sector", how="left").with_columns(
+            pl.when((pl.col("_EI_base") > 0) & (pl.col("_EI_frontier") > 0))
+            .then(
+                pl.max_horizontal(
+                    pl.lit(0.0),
+                    pl.col("_EI_base").log() - pl.col("_EI_frontier").log(),
+                )
+            )
+            .otherwise(None)
+            .alias("ei_gap")
+        )
+        out = self._add_rolling_sector_background(out, int(panel["year"].max()) - 1)
+        rho_gap = float(self.historical_gap_parameters["rho_gap"])
+        tau_gap = float(self.historical_gap_parameters["tau_gap"])
+        out = out.with_columns(
+            pl.lit(None, dtype=pl.Float64).alias("readiness"),
+            pl.when(pl.col("ei_gap").is_null() | (pl.col("ei_gap") <= 0))
+            .then(pl.col("sector_background_trend").fill_null(self.config.emissions.sector_background_fallback))
+            .otherwise(
+                pl.col("sector_background_trend").fill_null(self.config.emissions.sector_background_fallback)
+                + pl.lit(rho_gap) * pl.col("ei_gap") / (pl.col("ei_gap") + pl.lit(tau_gap))
+            )
+            .clip(self.config.emissions.rEI_min, self.config.emissions.rEI_max)
+            .alias("rEI_used"),
+            pl.lit(self.emissions_transition_mode).alias("emissions_transition_mode"),
+            pl.lit(rho_gap).alias("historical_rho_gap"),
+            pl.lit(tau_gap).alias("historical_tau_gap"),
+            pl.lit(str(self.historical_gap_parameters["parameter_source"])).alias(
+                "historical_parameter_source"
+            ),
+        )
+        cap_increment = (
+            self.config.capability.delta_cap_param
+            * (self.config.capability.cap_max - pl.col("_cap_base").fill_null(pl.col("cap_sim")))
+            * (
+                self.config.capability.k_cap
+                * (pl.col("_cap_base").fill_null(pl.col("cap_sim")) - self.config.capability.tau_cap)
+            ).map_elements(lambda value: _sigmoid_for_sim(value), return_dtype=pl.Float64)
+        )
+        gcap_increment = (
+            self.config.capability.delta_gcap_param
+            * (self.config.capability.gcap_max - pl.col("_gcap_base").fill_null(pl.col("gcap_sim")))
+            * (
+                self.config.capability.k_gcap
+                * (pl.col("_gcap_base").fill_null(pl.col("gcap_sim")) - self.config.capability.tau_gcap)
+            ).map_elements(lambda value: _sigmoid_for_sim(value), return_dtype=pl.Float64)
+        )
+        return out.with_columns(
+            (pl.col("_cap_base").fill_null(pl.col("cap_sim")) + cap_increment)
+            .clip(0.0, self.config.capability.cap_max)
+            .alias("cap_sim"),
+            (pl.col("_gcap_base").fill_null(pl.col("gcap_sim")) + gcap_increment)
+            .clip(0.0, self.config.capability.gcap_max)
+            .alias("gcap_sim"),
+        ).drop(["_EI_frontier"])
+
     def _add_frontier_gap_and_readiness(self, panel: pl.DataFrame) -> pl.DataFrame:
         frontier = (
             panel.filter(pl.col("_EI_base") > 0)
@@ -428,6 +532,51 @@ class MultiYearBaseSimulator:
             .alias("gcap_sim"),
         ).drop(["_EI_frontier", "_readiness_linear", "_gap_closure"])
 
+    def _rolling_sector_frontier_for_transition_year(self, transition_year: int) -> pl.DataFrame:
+        """Return rolling sector p50 frontiers using only observations up to transition_year."""
+        if self._state_for_frontiers is None:
+            self._state_for_frontiers = self.load_state_panel()
+        valid = self._state_for_frontiers.filter(
+            (pl.col("Year") <= transition_year) & (pl.col("EI") > 0)
+        )
+        if valid.is_empty():
+            return pl.DataFrame({"Sector": [], "_EI_frontier": []})
+        return valid.group_by("Sector").agg(pl.col("EI").quantile(0.50).alias("_EI_frontier"))
+
+    def _add_rolling_sector_background(self, panel: pl.DataFrame, transition_year: int) -> pl.DataFrame:
+        """Add sector median observed rEI up to transition_year as historical background."""
+        if self._state_for_frontiers is None:
+            self._state_for_frontiers = self.load_state_panel()
+        observed = (
+            self._state_for_frontiers.sort(["country_sector", "Year"])
+            .with_columns(
+                pl.col("Year").shift(-1).over("country_sector").alias("_next_year"),
+                pl.col("EI").shift(-1).over("country_sector").alias("_next_EI"),
+            )
+            .filter(
+                (pl.col("Year") <= transition_year)
+                & (pl.col("_next_year") == pl.col("Year") + 1)
+                & (pl.col("EI") > 0)
+                & (pl.col("_next_EI") > 0)
+            )
+            .with_columns((pl.col("EI").log() - pl.col("_next_EI").log()).alias("_observed_rEI"))
+        )
+        global_median = observed["_observed_rEI"].median() if not observed.is_empty() else None
+        fallback = (
+            self.config.emissions.sector_background_fallback
+            if global_median is None
+            else float(global_median)
+        )
+        background = (
+            observed.group_by("Sector")
+            .agg(pl.col("_observed_rEI").median().clip(-0.03, 0.05).alias("sector_background_trend"))
+            if not observed.is_empty()
+            else pl.DataFrame({"Sector": [], "sector_background_trend": []})
+        )
+        return panel.join(background, on="Sector", how="left").with_columns(
+            pl.col("sector_background_trend").fill_null(fallback)
+        )
+
     def _build_year_summary(
         self,
         frame: pl.DataFrame,
@@ -472,6 +621,10 @@ class MultiYearBaseSimulator:
             "bad_transition_flag": False,
             "emissions_identity_max_error": identity_residual,
             "historical_production_forcing": self.historical_production_forcing,
+            "emissions_transition_mode": self.emissions_transition_mode,
+            "historical_rho_gap": self.historical_gap_parameters.get("rho_gap"),
+            "historical_tau_gap": self.historical_gap_parameters.get("tau_gap"),
+            "historical_parameter_source": self.historical_gap_parameters.get("parameter_source"),
             "status": status,
             "warnings": "; ".join(warnings),
         }
@@ -516,6 +669,10 @@ class MultiYearBaseSimulator:
                 "simulation_end_year": [self.config.end_year],
                 "year_count": [summary.height],
                 "historical_production_forcing": [self.historical_production_forcing],
+                "emissions_transition_mode": [self.emissions_transition_mode],
+                "historical_parameter_source": [
+                    self.historical_gap_parameters.get("parameter_source", "")
+                ],
                 "status": [status],
                 "missing_required_columns": ["; ".join(missing)],
                 "max_emissions_identity_error": [max_identity],
@@ -527,6 +684,35 @@ class MultiYearBaseSimulator:
                 "scenario_outputs_created": [False],
             }
         )
+
+    def _format_historical_frontier_gap_validation_markdown(
+        self,
+        result: MultiYearBaseSimulationResult,
+    ) -> str:
+        """Render a compact validation report for the calibrated-historical run."""
+        validation = result.validation_report.to_dicts()[0]
+        latest = result.summary_panel.sort("year").tail(1).to_dicts()[0]
+        return "\n".join(
+            [
+                "# ABM v4 Historical Frontier-Gap Multi-Year Validation",
+                "",
+                "This run uses `historical_frontier_gap_only`; it is not a scenario.",
+                "",
+                "## Summary",
+                "",
+                f"- Status: {validation['status']}",
+                f"- Years: {validation['simulation_start_year']}-{validation['simulation_end_year']}",
+                f"- Historical production forcing: {validation['historical_production_forcing']}",
+                f"- Parameter source: {validation['historical_parameter_source']}",
+                f"- Latest aggregate emissions pct error: {latest['aggregate_emissions_error_pct']}",
+                f"- Mean rEI used latest year: {latest['mean_rEI_used']}",
+                f"- Max emissions identity error: {validation['max_emissions_identity_error']}",
+                "",
+                "## Caveat",
+                "",
+                "Production remains historically forced and this run is not scenario-ready.",
+            ]
+        ) + "\n"
 
     def _normalize_expr(self, column_name: str) -> pl.Expr:
         value = pl.col(column_name).cast(pl.Float64, strict=False)

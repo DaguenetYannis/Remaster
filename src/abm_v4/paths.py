@@ -325,20 +325,212 @@ class ABMV4Paths:
         return self.validation / "emissions_calibration_report.md"
 
     @property
+    def emissions_hypothesis_diagnosis_path(self) -> Path:
+        return self.validation / "emissions_hypothesis_diagnosis.csv"
+
+    @property
+    def emissions_target_horizon_panel_path(self) -> Path:
+        return self.validation / "emissions_target_horizon_panel.parquet"
+
+    @property
+    def emissions_target_horizon_summary_path(self) -> Path:
+        return self.validation / "emissions_target_horizon_summary.csv"
+
+    @property
+    def emissions_predictor_screening_path(self) -> Path:
+        return self.validation / "emissions_predictor_screening.csv"
+
+    @property
+    def emissions_sector_dominance_diagnostics_path(self) -> Path:
+        return self.validation / "emissions_sector_dominance_diagnostics.csv"
+
+    @property
+    def emissions_capability_source_diagnostics_path(self) -> Path:
+        return self.validation / "emissions_capability_source_diagnostics.csv"
+
+    @property
+    def emissions_readiness_threshold_diagnostics_path(self) -> Path:
+        return self.validation / "emissions_readiness_threshold_diagnostics.csv"
+
+    @property
+    def emissions_frontier_specification_diagnostics_path(self) -> Path:
+        return self.validation / "emissions_frontier_specification_diagnostics.csv"
+
+    @property
+    def emissions_macro_shock_diagnostics_path(self) -> Path:
+        return self.validation / "emissions_macro_shock_diagnostics.csv"
+
+    @property
+    def emissions_hypothesis_diagnostic_report_path(self) -> Path:
+        return self.validation / "emissions_hypothesis_diagnostic_report.md"
+
+    @property
+    def emissions_transition_variant_results_path(self) -> Path:
+        return self.validation / "emissions_transition_variant_results.csv"
+
+    @property
+    def emissions_transition_variant_by_sector_family_path(self) -> Path:
+        return self.validation / "emissions_transition_variant_by_sector_family.csv"
+
+    @property
+    def emissions_transition_variant_by_capability_source_path(self) -> Path:
+        return self.validation / "emissions_transition_variant_by_capability_source.csv"
+
+    @property
+    def emissions_transition_variant_best_parameters_path(self) -> Path:
+        return self.validation / "emissions_transition_variant_best_parameters.json"
+
+    @property
+    def emissions_transition_variant_recommendation_path(self) -> Path:
+        return self.validation / "emissions_transition_variant_recommendation.csv"
+
+    @property
+    def emissions_transition_variant_report_path(self) -> Path:
+        return self.validation / "emissions_transition_variant_report.md"
+
+    @property
     def base_multiyear_state_panel_path(self) -> Path:
         return self.simulations / "base_multiyear_state_panel.parquet"
+
+    @property
+    def base_multiyear_state_panel_historical_frontier_gap_path(self) -> Path:
+        return self.simulations / "base_multiyear_state_panel_historical_frontier_gap.parquet"
 
     @property
     def base_multiyear_summary_panel_path(self) -> Path:
         return self.simulations / "base_multiyear_summary_panel.csv"
 
     @property
+    def base_multiyear_summary_panel_historical_frontier_gap_path(self) -> Path:
+        return self.simulations / "base_multiyear_summary_panel_historical_frontier_gap.csv"
+
+    @property
     def base_multiyear_validation_report_path(self) -> Path:
         return self.diagnostics / "base_multiyear_validation_report.csv"
 
     @property
+    def base_multiyear_validation_report_historical_frontier_gap_csv_path(self) -> Path:
+        return self.validation / "base_multiyear_validation_report_historical_frontier_gap.csv"
+
+    @property
+    def base_multiyear_validation_report_historical_frontier_gap_md_path(self) -> Path:
+        return self.validation / "base_multiyear_validation_report_historical_frontier_gap.md"
+
+    @property
     def base_multiyear_yearly_diagnostics_path(self) -> Path:
         return self.diagnostics / "base_multiyear_yearly_diagnostics.csv"
+
+    @property
+    def base_multiyear_yearly_diagnostics_historical_frontier_gap_path(self) -> Path:
+        return self.diagnostics / "base_multiyear_yearly_diagnostics_historical_frontier_gap.csv"
+
+    @property
+    def multiyear_base_model_comparison_csv_path(self) -> Path:
+        return self.validation / "multiyear_base_model_comparison.csv"
+
+    @property
+    def multiyear_base_model_comparison_md_path(self) -> Path:
+        return self.validation / "multiyear_base_model_comparison.md"
+
+    @property
+    def transition_rule_error_decomposition_path(self) -> Path:
+        return self.validation / "transition_rule_error_decomposition.csv"
+
+    @property
+    def transition_rule_sign_failure_panel_path(self) -> Path:
+        return self.validation / "transition_rule_sign_failure_panel.parquet"
+
+    @property
+    def transition_rule_sign_failure_by_year_path(self) -> Path:
+        return self.validation / "transition_rule_sign_failure_by_year.csv"
+
+    @property
+    def transition_rule_sign_failure_by_sector_path(self) -> Path:
+        return self.validation / "transition_rule_sign_failure_by_sector.csv"
+
+    @property
+    def transition_rule_sign_failure_by_country_path(self) -> Path:
+        return self.validation / "transition_rule_sign_failure_by_country.csv"
+
+    @property
+    def transition_rule_sign_failure_by_ecosystem_path(self) -> Path:
+        return self.validation / "transition_rule_sign_failure_by_ecosystem.csv"
+
+    @property
+    def transition_rule_sign_failure_by_capability_source_path(self) -> Path:
+        return self.validation / "transition_rule_sign_failure_by_capability_source.csv"
+
+    @property
+    def transition_rule_sign_failure_by_decile_path(self) -> Path:
+        return self.validation / "transition_rule_sign_failure_by_decile.csv"
+
+    @property
+    def transition_rule_aggregate_contribution_path(self) -> Path:
+        return self.validation / "transition_rule_aggregate_contribution.csv"
+
+    @property
+    def transition_rule_hypothesis_tests_path(self) -> Path:
+        return self.validation / "transition_rule_hypothesis_tests.csv"
+
+    @property
+    def transition_rule_error_tradeoff_report_path(self) -> Path:
+        return self.validation / "transition_rule_error_tradeoff_report.md"
+
+    @property
+    def high_emissions_concentration_diagnostic_path(self) -> Path:
+        return self.validation / "high_emissions_concentration_diagnostic.csv"
+
+    @property
+    def electricity_sector_dampening_diagnostic_path(self) -> Path:
+        return self.validation / "electricity_sector_dampening_diagnostic.csv"
+
+    @property
+    def china_electricity_transition_diagnostic_path(self) -> Path:
+        return self.validation / "china_electricity_transition_diagnostic.csv"
+
+    @property
+    def readiness_dampening_diagnostic_path(self) -> Path:
+        return self.validation / "readiness_dampening_diagnostic.csv"
+
+    @property
+    def simplified_model_selection_tradeoff_path(self) -> Path:
+        return self.validation / "simplified_model_selection_tradeoff.csv"
+
+    @property
+    def phase17_recommendation_path(self) -> Path:
+        return self.validation / "phase17_recommendation.csv"
+
+    @property
+    def phase17_high_emissions_dampening_report_path(self) -> Path:
+        return self.validation / "phase17_high_emissions_dampening_report.md"
+
+    @property
+    def electricity_node_inventory_path(self) -> Path:
+        return self.validation / "electricity_node_inventory.csv"
+
+    @property
+    def china_electricity_observed_series_audit_path(self) -> Path:
+        return self.validation / "china_electricity_observed_series_audit.csv"
+
+    @property
+    def china_electricity_model_series_audit_path(self) -> Path:
+        return self.validation / "china_electricity_model_series_audit.csv"
+
+    @property
+    def electricity_anomaly_flags_path(self) -> Path:
+        return self.validation / "electricity_anomaly_flags.csv"
+
+    @property
+    def electricity_cross_country_comparison_path(self) -> Path:
+        return self.validation / "electricity_cross_country_comparison.csv"
+
+    @property
+    def electricity_data_audit_recommendation_path(self) -> Path:
+        return self.validation / "electricity_data_audit_recommendation.csv"
+
+    @property
+    def electricity_data_audit_report_path(self) -> Path:
+        return self.validation / "electricity_data_audit_report.md"
 
     @property
     def supplier_edge_schema_report_path(self) -> Path:
