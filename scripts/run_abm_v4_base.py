@@ -60,6 +60,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Build Phase 4B supplier opportunity sets from compact candidate tables.",
     )
     parser.add_argument(
+        "--build-supplier-rewiring",
+        action="store_true",
+        help="Build Phase 4C initial weights, rewiring flags, and updated weights.",
+    )
+    parser.add_argument(
         "--candidate-debug-buyers",
         type=int,
         default=None,
@@ -267,6 +272,40 @@ def main() -> None:
         print(f"Buyers with probability sum error: {report_row['buyers_with_probability_sum_error']}")
         print(f"Opportunity set path: {paths.supplier_opportunity_sets_path}")
         print(f"Opportunity set report path: {paths.supplier_opportunity_set_report_path}")
+        return
+
+    if args.build_supplier_rewiring:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--build-supplier-rewiring requires --create-output-dirs to write outputs."
+            )
+        builder = SupplierNetworkBuilder(
+            paths=paths,
+            start_year=config.start_year,
+            end_year=config.end_year,
+        )
+        random_seed = getattr(config, "random_seed", 42)
+        initial_weights, rewiring_flags, updated_weights, report = (
+            builder.build_supplier_rewiring_outputs(
+                supplier_choice=config.supplier_choice,
+                random_seed=random_seed,
+            )
+        )
+        builder.write_supplier_rewiring_outputs(
+            initial_weights=initial_weights,
+            rewiring_flags=rewiring_flags,
+            updated_weights=updated_weights,
+            report=report,
+        )
+        report_row = report.to_dicts()[0]
+        print("Built supplier rewiring weights.")
+        print(f"Number of buyers: {report_row['number_of_buyers']}")
+        print(f"Rewired buyer share: {report_row['rewired_buyer_share']}")
+        print(f"Max updated weight sum error: {report_row['max_updated_weight_sum_error']}")
+        print(f"Initial weights path: {paths.supplier_initial_weights_path}")
+        print(f"Rewiring flags path: {paths.supplier_rewiring_flags_path}")
+        print(f"Updated weights path: {paths.supplier_updated_weights_path}")
+        print(f"Supplier rewiring report path: {paths.supplier_rewiring_report_path}")
         return
 
     if args.create_output_dirs:

@@ -318,6 +318,64 @@ Caveat:
 
 - These opportunity sets are feasible alternatives only. Phase 4B does not implement realized supplier rewiring, dynamic supplier weight updates, production propagation, or scenarios.
 
+## Phase 4C Supplier Rewiring Draws and Weight Updates
+
+ABM v4 now builds a one-step baseline supplier-side weight update from the Phase 4B opportunity set. This phase creates initial weights, buyer-level rewiring flags, and updated weights. It does not run production, emissions, or scenario simulation.
+
+Inputs:
+
+```text
+data/abm_v4/interim/supplier_opportunity_sets.parquet
+data/abm_v4/inputs/abm_v4_state_panel_1995_2016.parquet
+```
+
+Generated outputs:
+
+```text
+data/abm_v4/interim/supplier_initial_weights.parquet
+data/abm_v4/interim/supplier_rewiring_flags.parquet
+data/abm_v4/interim/supplier_updated_weights.parquet
+data/abm_v4/diagnostics/supplier_rewiring_report.csv
+```
+
+Real-data supplier rewiring summary:
+
+- Number of buyers: 4,915
+- Opportunity rows / weight rows: 308,920
+- Rewired buyers: 55
+- Rewired buyer share: 0.011190233977619531
+- Mean rewiring probability: 0.01269445476897798
+- Median rewiring probability: 0.012173219555639662
+- Maximum rewiring probability: 0.033166856998914244
+- Mean absolute weight delta: 0.000026204473064471854
+- Maximum absolute weight delta: 0.04886093039474282
+
+Weight normalization validation:
+
+- Buyers with initial weight-sum error: 0
+- Buyers with updated weight-sum error: 0
+- Maximum initial weight-sum error: 2.220446049250313e-16
+- Maximum updated weight-sum error: 2.220446049250313e-16
+
+Fallbacks:
+
+- Buyers using choice-probability initialization because no historical candidate weight was available: 2
+- Buyers using fallback stress = 0: 4,915
+- Buyers using computed green-gap fallback: 4,915
+
+Method:
+
+- Historical candidates initialize from `historical_tie_strength`; non-historical candidates initialize at zero.
+- Buyers with no historical weights initialize from `choice_probability`.
+- Buyer-level rewiring probability is `p_rewire_base + p_rewire_stress * stress + p_rewire_green_gap * green_gap`, clipped to `[0, 1]`.
+- Rewiring draws use a deterministic seed fallback.
+- Rewired buyers move weights toward `choice_probability` using `lambda_weight_update`; non-rewired buyers keep initial weights.
+- Updated weights are renormalized by buyer.
+
+Caveat:
+
+- This is a one-step baseline supplier-weight update layer. It is not the full dynamic simulation, does not propagate production, does not simulate emissions, and does not implement scenarios.
+
 ## Extension from ABM v3
 
 ABM v4 introduces a separate namespace and output root. It can inspect ABM v3 outputs as preferred inputs, but writes only under `data/abm_v4/` when explicitly run.
@@ -376,6 +434,12 @@ Build supplier opportunity sets from compact candidate tables:
 
 ```powershell
 python scripts/run_abm_v4_base.py --build-supplier-opportunities --create-output-dirs
+```
+
+Build one-step supplier rewiring flags and supplier-weight updates:
+
+```powershell
+python scripts/run_abm_v4_base.py --build-supplier-rewiring --create-output-dirs
 ```
 
 ## Output Root

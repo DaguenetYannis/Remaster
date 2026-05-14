@@ -125,6 +125,31 @@ def write_toy_opportunity_inputs(paths: ABMV4Paths) -> None:
     same_sector.write_parquet(paths.supplier_pool_same_sector_path)
     ecosystem.write_parquet(paths.supplier_pool_ecosystem_path)
 
+
+def toy_supplier_opportunities() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "buyer_country_sector": ["B1", "B1", "B1", "B2", "B2"],
+            "supplier_country_sector": ["S1", "S2", "S3", "S1", "S2"],
+            "supplier_type": [
+                "historical",
+                "historical",
+                "ecosystem_feasible",
+                "ecosystem_feasible",
+                "same_sector_foreign",
+            ],
+            "candidate_sources": [
+                "historical",
+                "historical;same_sector",
+                "ecosystem",
+                "ecosystem",
+                "same_sector",
+            ],
+            "choice_probability": [0.2, 0.7, 0.1, 0.4, 0.6],
+            "historical_tie_strength": [0.25, 0.75, None, None, None],
+        }
+    )
+
 def write_toy_t_matrix(paths: ABMV4Paths, year: int = 1995) -> None:
     path = paths.data_root / "parquet" / str(year) / "T.parquet"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -759,6 +784,158 @@ def test_opportunity_build_does_not_write_without_explicit_write() -> None:
 
     assert not paths.supplier_opportunity_sets_path.exists()
     assert not paths.supplier_opportunity_set_report_path.exists()
+
+
+def test_initial_weights_use_historical_tie_strength() -> None:
+    builder = SupplierNetworkBuilder(paths=ABMV4Paths(project_root=toy_root()))
+
+    weights = builder.build_supplier_initial_weights(toy_supplier_opportunities())
+
+    assert weights.filter(
+        (pl.col("buyer_country_sector") == "B1")
+        & (pl.col("supplier_country_sector") == "S1")
+    )["initial_weight"].item() == 0.25
+    assert weights.filter(
+        (pl.col("buyer_country_sector") == "B1")
+        & (pl.col("supplier_country_sector") == "S2")
+    )["initial_weight"].item() == 0.75
+
+
+def test_non_historical_candidates_initialize_at_zero() -> None:
+    builder = SupplierNetworkBuilder(paths=ABMV4Paths(project_root=toy_root()))
+
+    weights = builder.build_supplier_initial_weights(toy_supplier_opportunities())
+
+    assert weights.filter(
+        (pl.col("buyer_country_sector") == "B1")
+        & (pl.col("supplier_country_sector") == "S3")
+    )["initial_weight"].item() == 0.0
+
+
+def test_initial_weights_sum_to_one_by_buyer() -> None:
+    builder = SupplierNetworkBuilder(paths=ABMV4Paths(project_root=toy_root()))
+
+    weights = builder.build_supplier_initial_weights(toy_supplier_opportunities())
+    sums = weights.group_by("buyer_country_sector").agg(pl.sum("initial_weight").alias("sum"))
+
+    assert all(abs(value - 1.0) < 1e-12 for value in sums["sum"].to_list())
+
+
+def test_initial_weight_fallback_uses_choice_probability_without_history() -> None:
+    builder = SupplierNetworkBuilder(paths=ABMV4Paths(project_root=toy_root()))
+
+    weights = builder.build_supplier_initial_weights(toy_supplier_opportunities())
+    b2 = weights.filter(pl.col("buyer_country_sector") == "B2").sort("supplier_country_sector")
+
+    assert b2["fallback_initialization_used"].to_list() == [True, True]
+    assert b2["initial_weight"].to_list() == [0.4, 0.6]
+
+
+def test_rewire_probability_is_clipped_to_unit_interval() -> None:
+    root = toy_root()
+    paths = ABMV4Paths(project_root=root)
+    write_toy_opportunity_state(paths)
+    paths.supplier_opportunity_sets_path.parent.mkdir(parents=True, exist_ok=True)
+    toy_supplier_opportunities().write_parquet(paths.supplier_opportunity_sets_path)
+    choice = type(
+        "Choice",
+        (),
+        {"p_rewire_base": 2.0, "p_rewire_stress": 0.0, "p_rewire_green_gap": 0.0},
+    )()
+
+    flags = SupplierNetworkBuilder(paths=paths).build_supplier_rewiring_flags(
+        supplier_choice=choice,
+        random_seed=1,
+    )
+
+    assert flags["p_rewire"].max() == 1.0
+    assert flags["p_rewire"].min() == 1.0
+
+
+def test_seeded_rewiring_draw_is_reproducible() -> None:
+    root = toy_root()
+    paths = ABMV4Paths(project_root=root)
+    write_toy_opportunity_state(paths)
+    paths.supplier_opportunity_sets_path.parent.mkdir(parents=True, exist_ok=True)
+    toy_supplier_opportunities().write_parquet(paths.supplier_opportunity_sets_path)
+    builder = SupplierNetworkBuilder(paths=paths)
+
+    first = builder.build_supplier_rewiring_flags(random_seed=7)
+    second = builder.build_supplier_rewiring_flags(random_seed=7)
+
+    assert first["random_draw"].to_list() == second["random_draw"].to_list()
+    assert first["rewire_flag"].to_list() == second["rewire_flag"].to_list()
+
+
+def test_updated_weight_equals_initial_weight_when_not_rewired() -> None:
+    builder = SupplierNetworkBuilder(paths=ABMV4Paths(project_root=toy_root()))
+    initial = builder.build_supplier_initial_weights(toy_supplier_opportunities())
+    flags = pl.DataFrame(
+        {"buyer_country_sector": ["B1", "B2"], "rewire_flag": [False, False], "p_rewire": [0.0, 0.0]}
+    )
+
+    updated = builder.build_supplier_updated_weights(initial, flags)
+
+    assert updated["updated_weight"].to_list() == updated["initial_weight"].to_list()
+
+
+def test_updated_weight_moves_toward_choice_probability_when_rewired() -> None:
+    choice = type("Choice", (), {"lambda_weight_update": 0.5})()
+    builder = SupplierNetworkBuilder(paths=ABMV4Paths(project_root=toy_root()))
+    initial = builder.build_supplier_initial_weights(toy_supplier_opportunities())
+    flags = pl.DataFrame(
+        {"buyer_country_sector": ["B1", "B2"], "rewire_flag": [True, False], "p_rewire": [1.0, 0.0]}
+    )
+
+    updated = builder.build_supplier_updated_weights(initial, flags, supplier_choice=choice)
+    row = updated.filter(
+        (pl.col("buyer_country_sector") == "B1")
+        & (pl.col("supplier_country_sector") == "S2")
+    ).row(0, named=True)
+
+    assert row["updated_weight"] < row["initial_weight"]
+    assert row["updated_weight"] > row["choice_probability"]
+
+
+def test_updated_weights_sum_to_one_by_buyer() -> None:
+    builder = SupplierNetworkBuilder(paths=ABMV4Paths(project_root=toy_root()))
+    initial = builder.build_supplier_initial_weights(toy_supplier_opportunities())
+    flags = pl.DataFrame(
+        {"buyer_country_sector": ["B1", "B2"], "rewire_flag": [True, True], "p_rewire": [1.0, 1.0]}
+    )
+
+    updated = builder.build_supplier_updated_weights(initial, flags)
+    sums = updated.group_by("buyer_country_sector").agg(pl.sum("updated_weight").alias("sum"))
+
+    assert all(abs(value - 1.0) < 1e-12 for value in sums["sum"].to_list())
+
+
+def test_rewiring_diagnostics_detect_weight_sum_errors() -> None:
+    builder = SupplierNetworkBuilder(paths=ABMV4Paths(project_root=toy_root()))
+    initial = pl.DataFrame(
+        {
+            "buyer_country_sector": ["B1"],
+            "initial_weight": [0.5],
+            "fallback_initialization_used": [False],
+        }
+    )
+    flags = pl.DataFrame(
+        {
+            "buyer_country_sector": ["B1"],
+            "rewire_flag": [False],
+            "p_rewire": [0.0],
+            "fallback_stress_used": [True],
+            "fallback_green_gap_used": [True],
+        }
+    )
+    updated = pl.DataFrame(
+        {"buyer_country_sector": ["B1"], "updated_weight": [0.5], "weight_delta": [0.0]}
+    )
+
+    report = builder.build_supplier_rewiring_report(initial, flags, updated)
+
+    assert report["buyers_with_initial_weight_sum_error"].item() == 1
+    assert report["buyers_with_updated_weight_sum_error"].item() == 1
 
 
 def test_build_historical_edges_does_not_create_all_to_all_edges() -> None:

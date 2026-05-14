@@ -1309,6 +1309,317 @@ class SupplierNetworkBuilder:
         opportunities.write_parquet(self.paths.supplier_opportunity_sets_path)
         report.write_csv(self.paths.supplier_opportunity_set_report_path)
 
+    def build_supplier_initial_weights(
+        self,
+        opportunities: pl.DataFrame | None = None,
+    ) -> pl.DataFrame:
+        """Build normalized initial supplier weights from historical ties."""
+        if opportunities is None:
+            opportunities = pl.read_parquet(self.paths.supplier_opportunity_sets_path)
+        if "is_historical_candidate" not in opportunities.columns:
+            opportunities = opportunities.with_columns(
+                (
+                    (pl.col("supplier_type") == "historical")
+                    | pl.col("candidate_sources").str.contains("historical", literal=True)
+                ).alias("is_historical_candidate")
+            )
+        weighted = (
+            opportunities.with_columns(
+                pl.when(pl.col("is_historical_candidate"))
+                .then(pl.col("historical_tie_strength").fill_null(0.0))
+                .otherwise(0.0)
+                .alias("_historical_initial_raw")
+            )
+            .with_columns(
+                pl.sum("_historical_initial_raw")
+                .over("buyer_country_sector")
+                .alias("_buyer_historical_initial_sum")
+            )
+            .with_columns(
+                (pl.col("_buyer_historical_initial_sum") <= 0).alias(
+                    "fallback_initialization_used"
+                )
+            )
+            .with_columns(
+                pl.when(pl.col("fallback_initialization_used"))
+                .then(pl.col("choice_probability").fill_null(0.0))
+                .otherwise(pl.col("_historical_initial_raw"))
+                .alias("_initial_raw")
+            )
+            .with_columns(
+                pl.sum("_initial_raw").over("buyer_country_sector").alias("_initial_raw_sum")
+            )
+            .with_columns(
+                pl.when(pl.col("_initial_raw_sum") > 0)
+                .then(pl.col("_initial_raw") / pl.col("_initial_raw_sum"))
+                .otherwise(0.0)
+                .alias("initial_weight")
+            )
+        )
+        return weighted.select(
+            "buyer_country_sector",
+            "supplier_country_sector",
+            "supplier_type",
+            "candidate_sources",
+            "initial_weight",
+            "choice_probability",
+            "historical_tie_strength",
+            "fallback_initialization_used",
+        )
+
+    def build_supplier_rewiring_flags(
+        self,
+        supplier_choice: object | None = None,
+        random_seed: int = 42,
+        opportunity_year: int | None = None,
+    ) -> pl.DataFrame:
+        """Draw deterministic buyer-level rewiring flags for one baseline update."""
+        state_panel = self.load_state_panel()
+        years = sorted(state_panel["Year"].drop_nulls().unique().to_list())
+        latest_year = opportunity_year if opportunity_year is not None else max(years)
+        latest = state_panel.filter(pl.col("Year") == latest_year)
+        buyer_values = latest.select(
+            "country_sector",
+            "g_local_v4",
+            *([column for column in ("stress", "stress_i") if column in latest.columns]),
+        ).unique(subset=["country_sector"])
+        stress_column = None
+        for candidate_column in ("stress", "stress_i"):
+            if candidate_column in buyer_values.columns:
+                stress_column = candidate_column
+                break
+        if stress_column is None:
+            buyer_values = buyer_values.with_columns(
+                pl.lit(0.0).alias("stress"),
+                pl.lit(True).alias("fallback_stress_used"),
+            )
+        else:
+            buyer_values = buyer_values.with_columns(
+                pl.col(stress_column).fill_null(0.0).alias("stress"),
+                pl.col(stress_column).is_null().alias("fallback_stress_used"),
+            )
+        p75_green = latest["g_local_v4"].drop_nulls().quantile(0.75)
+        if p75_green is None:
+            p75_green = 0.0
+        buyer_values = buyer_values.with_columns(
+            pl.when(pl.col("g_local_v4").is_not_null())
+            .then((pl.lit(p75_green) - pl.col("g_local_v4")).clip(0.0, None))
+            .otherwise(0.0)
+            .alias("green_gap"),
+            pl.lit(True).alias("fallback_green_gap_used"),
+        )
+        p_rewire_base = getattr(supplier_choice, "p_rewire_base", 0.01)
+        p_rewire_stress = getattr(supplier_choice, "p_rewire_stress", 0.05)
+        p_rewire_green_gap = getattr(supplier_choice, "p_rewire_green_gap", 0.05)
+        buyers = (
+            pl.read_parquet(self.paths.supplier_opportunity_sets_path)
+            .select("buyer_country_sector")
+            .unique()
+            .join(
+                buyer_values.select(
+                    pl.col("country_sector").alias("buyer_country_sector"),
+                    "stress",
+                    "green_gap",
+                    "fallback_stress_used",
+                    "fallback_green_gap_used",
+                ),
+                on="buyer_country_sector",
+                how="left",
+            )
+            .with_columns(
+                pl.col("stress").fill_null(0.0),
+                pl.col("green_gap").fill_null(0.0),
+                pl.col("fallback_stress_used").fill_null(True),
+                pl.col("fallback_green_gap_used").fill_null(True),
+            )
+            .with_columns(
+                (
+                    pl.lit(p_rewire_base)
+                    + pl.lit(p_rewire_stress) * pl.col("stress")
+                    + pl.lit(p_rewire_green_gap) * pl.col("green_gap")
+                )
+                .clip(0.0, 1.0)
+                .alias("p_rewire")
+            )
+            .sort("buyer_country_sector")
+        )
+        rng = np.random.default_rng(random_seed)
+        draws = rng.random(buyers.height)
+        return buyers.with_columns(
+            pl.Series("random_draw", draws),
+            (pl.Series("random_draw", draws) < pl.col("p_rewire")).alias("rewire_flag"),
+        ).select(
+            "buyer_country_sector",
+            "p_rewire",
+            "stress",
+            "green_gap",
+            "random_draw",
+            "rewire_flag",
+            "fallback_stress_used",
+            "fallback_green_gap_used",
+        )
+
+    def build_supplier_updated_weights(
+        self,
+        initial_weights: pl.DataFrame,
+        rewiring_flags: pl.DataFrame,
+        supplier_choice: object | None = None,
+    ) -> pl.DataFrame:
+        """Apply one baseline supplier-weight update and normalize by buyer."""
+        lambda_supplier_weight = getattr(
+            supplier_choice,
+            "lambda_supplier_weight",
+            getattr(supplier_choice, "lambda_weight_update", 0.10),
+        )
+        updated = (
+            initial_weights.join(rewiring_flags, on="buyer_country_sector", how="left")
+            .with_columns(
+                pl.col("rewire_flag").fill_null(False),
+                pl.col("p_rewire").fill_null(0.0),
+            )
+            .with_columns(
+                pl.when(pl.col("rewire_flag"))
+                .then(
+                    (1.0 - lambda_supplier_weight) * pl.col("initial_weight")
+                    + lambda_supplier_weight * pl.col("choice_probability")
+                )
+                .otherwise(pl.col("initial_weight"))
+                .alias("_updated_weight_raw")
+            )
+            .with_columns(
+                pl.sum("_updated_weight_raw")
+                .over("buyer_country_sector")
+                .alias("_updated_weight_sum")
+            )
+            .with_columns(
+                pl.when(pl.col("_updated_weight_sum") > 0)
+                .then(pl.col("_updated_weight_raw") / pl.col("_updated_weight_sum"))
+                .otherwise(0.0)
+                .alias("updated_weight")
+            )
+            .with_columns(
+                (pl.col("updated_weight") - pl.col("initial_weight")).alias("weight_delta")
+            )
+        )
+        return updated.select(
+            "buyer_country_sector",
+            "supplier_country_sector",
+            "supplier_type",
+            "candidate_sources",
+            "initial_weight",
+            "choice_probability",
+            "updated_weight",
+            "rewire_flag",
+            "p_rewire",
+            "weight_delta",
+        )
+
+    def build_supplier_rewiring_report(
+        self,
+        initial_weights: pl.DataFrame,
+        rewiring_flags: pl.DataFrame,
+        updated_weights: pl.DataFrame,
+    ) -> pl.DataFrame:
+        """Build supplier rewiring and weight-normalization diagnostics."""
+        initial_errors = self._weight_sum_errors(initial_weights, "initial_weight")
+        updated_errors = self._weight_sum_errors(updated_weights, "updated_weight")
+        number_of_buyers = rewiring_flags.height
+        opportunity_rows = updated_weights.height
+        rewired_buyers = rewiring_flags.filter(pl.col("rewire_flag")).height
+        return pl.DataFrame(
+            {
+                "number_of_buyers": [number_of_buyers],
+                "opportunity_rows": [opportunity_rows],
+                "rewired_buyers": [rewired_buyers],
+                "rewired_buyer_share": [
+                    rewired_buyers / number_of_buyers if number_of_buyers else 0.0
+                ],
+                "mean_p_rewire": [rewiring_flags["p_rewire"].mean()],
+                "median_p_rewire": [rewiring_flags["p_rewire"].median()],
+                "max_p_rewire": [rewiring_flags["p_rewire"].max()],
+                "mean_abs_weight_delta": [updated_weights["weight_delta"].abs().mean()],
+                "max_abs_weight_delta": [updated_weights["weight_delta"].abs().max()],
+                "buyers_with_initial_weight_sum_error": [
+                    initial_errors.filter(pl.col("weight_sum_error") > 1e-8).height
+                ],
+                "buyers_with_updated_weight_sum_error": [
+                    updated_errors.filter(pl.col("weight_sum_error") > 1e-8).height
+                ],
+                "max_initial_weight_sum_error": [
+                    initial_errors["weight_sum_error"].max() if initial_errors.height else 0.0
+                ],
+                "max_updated_weight_sum_error": [
+                    updated_errors["weight_sum_error"].max() if updated_errors.height else 0.0
+                ],
+                "fallback_initialization_buyers": [
+                    initial_weights.filter(pl.col("fallback_initialization_used"))
+                    .select("buyer_country_sector")
+                    .unique()
+                    .height
+                    if "fallback_initialization_used" in initial_weights.columns
+                    else 0
+                ],
+                "fallback_stress_buyers": [
+                    rewiring_flags.filter(pl.col("fallback_stress_used")).height
+                ],
+                "fallback_green_gap_buyers": [
+                    rewiring_flags.filter(pl.col("fallback_green_gap_used")).height
+                ],
+                "notes": [
+                    (
+                        "One-step baseline supplier-side weight update from opportunity sets. "
+                        "This is not production simulation, emissions simulation, or scenarios."
+                    )
+                ],
+            }
+        )
+
+    def build_supplier_rewiring_outputs(
+        self,
+        supplier_choice: object | None = None,
+        random_seed: int = 42,
+        opportunity_year: int | None = None,
+    ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+        """Build initial weights, rewiring flags, updated weights, and diagnostics."""
+        opportunities = pl.read_parquet(self.paths.supplier_opportunity_sets_path)
+        initial_weights = self.build_supplier_initial_weights(opportunities)
+        rewiring_flags = self.build_supplier_rewiring_flags(
+            supplier_choice=supplier_choice,
+            random_seed=random_seed,
+            opportunity_year=opportunity_year,
+        )
+        updated_weights = self.build_supplier_updated_weights(
+            initial_weights,
+            rewiring_flags,
+            supplier_choice=supplier_choice,
+        )
+        report = self.build_supplier_rewiring_report(
+            initial_weights,
+            rewiring_flags,
+            updated_weights,
+        )
+        return initial_weights, rewiring_flags, updated_weights, report
+
+    def write_supplier_rewiring_outputs(
+        self,
+        initial_weights: pl.DataFrame,
+        rewiring_flags: pl.DataFrame,
+        updated_weights: pl.DataFrame,
+        report: pl.DataFrame,
+    ) -> None:
+        """Write supplier rewiring outputs and diagnostics."""
+        self.paths.interim.mkdir(parents=True, exist_ok=True)
+        self.paths.diagnostics.mkdir(parents=True, exist_ok=True)
+        initial_weights.write_parquet(self.paths.supplier_initial_weights_path)
+        rewiring_flags.write_parquet(self.paths.supplier_rewiring_flags_path)
+        updated_weights.write_parquet(self.paths.supplier_updated_weights_path)
+        report.write_csv(self.paths.supplier_rewiring_report_path)
+
+    def _weight_sum_errors(self, weights: pl.DataFrame, weight_column: str) -> pl.DataFrame:
+        return weights.group_by("buyer_country_sector").agg(
+            pl.sum(weight_column).alias("weight_sum")
+        ).with_columns((pl.col("weight_sum") - 1.0).abs().alias("weight_sum_error"))
+
     def _collect_raw_t_streaming_stats(
         self,
         years: Iterable[int],
