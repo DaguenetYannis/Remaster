@@ -145,6 +145,10 @@ class ABMV4Paths:
         return self.interim / "capability_update_panel.parquet"
 
     @property
+    def production_feasibility_panel_path(self) -> Path:
+        return self.interim / "production_feasibility_panel.parquet"
+
+    @property
     def supplier_edge_report_path(self) -> Path:
         return self.diagnostics / "supplier_edge_report.csv"
 
@@ -171,6 +175,10 @@ class ABMV4Paths:
     @property
     def capability_update_report_path(self) -> Path:
         return self.diagnostics / "capability_update_report.csv"
+
+    @property
+    def production_feasibility_report_path(self) -> Path:
+        return self.diagnostics / "production_feasibility_report.csv"
 
     @property
     def supplier_edge_schema_report_path(self) -> Path:

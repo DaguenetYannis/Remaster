@@ -9,6 +9,7 @@ from src.abm_v4.config import ABMV4Config
 from src.abm_v4.diagnostics import build_path_audit_rows, format_path_audit_table
 from src.abm_v4.ecosystem import EcosystemMapper
 from src.abm_v4.paths import ABMV4Paths
+from src.abm_v4.production import ProductionFeasibilityEngine
 from src.abm_v4.simulation import inspect_base_model_readiness
 from src.abm_v4.state import build_state_panel
 from src.abm_v4.suppliers import SupplierNetworkBuilder
@@ -69,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--build-capability-update",
         action="store_true",
         help="Build Phase 5 one-step capability exposure and update panels.",
+    )
+    parser.add_argument(
+        "--build-production-feasibility",
+        action="store_true",
+        help="Build Phase 6 one-step production feasibility diagnostics.",
     )
     parser.add_argument(
         "--candidate-debug-buyers",
@@ -336,6 +342,30 @@ def main() -> None:
         print(f"Capability exposure path: {paths.capability_exposure_panel_path}")
         print(f"Capability update path: {paths.capability_update_panel_path}")
         print(f"Capability report path: {paths.capability_update_report_path}")
+        return
+
+    if args.build_production_feasibility:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--build-production-feasibility requires --create-output-dirs to write outputs."
+            )
+        engine = ProductionFeasibilityEngine(
+            paths=paths,
+            start_year=config.start_year,
+            end_year=config.end_year,
+            epsilon=config.epsilon,
+        )
+        panel = engine.build_feasibility_panel()
+        report = engine.build_production_feasibility_report(panel)
+        engine.write_outputs(panel, report)
+        report_row = report.to_dicts()[0]
+        print("Built production feasibility diagnostics.")
+        print(f"Year: {report_row['year']}")
+        print(f"Node count: {report_row['node_count']}")
+        print(f"Aggregate feasibility ratio: {report_row['aggregate_feasibility_ratio']}")
+        print(f"Constrained node share: {report_row['share_nodes_with_input_feasibility_below_1']}")
+        print(f"Production feasibility path: {paths.production_feasibility_panel_path}")
+        print(f"Production feasibility report path: {paths.production_feasibility_report_path}")
         return
 
     if args.create_output_dirs:

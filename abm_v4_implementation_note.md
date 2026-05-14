@@ -437,6 +437,55 @@ Caveat:
 
 - This is a one-step capability update, not the full dynamic simulation. ABM v4 still has only general and green capability stocks; ecosystem-specific capability stocks remain a v5 extension.
 
+## Phase 6 One-Step Production Feasibility Layer
+
+ABM v4 now builds a one-step production feasibility diagnostic using the latest state panel year, raw Eora transaction requirements, and updated supplier weights. This phase does not run emissions, a multi-year loop, recursive Leontief propagation, or scenarios.
+
+Inputs:
+
+```text
+data/abm_v4/inputs/abm_v4_state_panel_1995_2016.parquet
+data/abm_v4/interim/supplier_updated_weights.parquet
+data/parquet/{year}/T.parquet
+```
+
+Generated outputs:
+
+```text
+data/abm_v4/interim/production_feasibility_panel.parquet
+data/abm_v4/diagnostics/production_feasibility_report.csv
+```
+
+Real-data production feasibility summary:
+
+- Selected year: 2016
+- Node count: 4,915
+- Total observed output: 153,240,228,193.02585
+- Total desired output: 153,240,228,193.02585
+- Total feasible output: 153,230,697,673.3565
+- Aggregate feasibility ratio: 0.9999378066726882
+- Mean input feasibility: 0.9995930824004696
+- Median input feasibility: 0.9999999999999984
+- 5th percentile input feasibility: 0.9999999999999223
+- 95th percentile max supplier pressure: 0.4274605852214408
+- Nodes with input feasibility below 1: 4,256
+- Share of nodes with input feasibility below 1: 0.8659206510681587
+- Nodes with supplier pressure above 1: 14
+- Share of nodes with supplier pressure above 1: 0.0028484231943031535
+
+Method:
+
+- Eora transaction orientation is treated as `T_{supplier,buyer}`.
+- Technical input requirements are derived from buyer-level raw T column sums divided by buyer observed output.
+- `X_desired` is set to `X_observed` for this base diagnostic.
+- Updated supplier weights allocate each buyer's total required inputs across feasible suppliers.
+- Supplier capacity pressure uses supplier `X_observed` as a capacity proxy.
+- `X_feasible = X_desired * min(1, input_feasibility)`.
+
+Caveat:
+
+- This is a one-step feasibility diagnostic, not full recursive Leontief propagation. It does not update supplier output recursively and does not simulate emissions or scenarios.
+
 ## Extension from ABM v3
 
 ABM v4 introduces a separate namespace and output root. It can inspect ABM v3 outputs as preferred inputs, but writes only under `data/abm_v4/` when explicitly run.
@@ -507,6 +556,12 @@ Build one-step capability exposures and capability updates:
 
 ```powershell
 python scripts/run_abm_v4_base.py --build-capability-update --create-output-dirs
+```
+
+Build one-step production feasibility diagnostics:
+
+```powershell
+python scripts/run_abm_v4_base.py --build-production-feasibility --create-output-dirs
 ```
 
 ## Output Root
