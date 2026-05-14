@@ -44,6 +44,17 @@ class CapabilityExposureWeights:
     omega_green_supplier_share: float = 0.33
 
 
+@dataclass(frozen=True)
+class IOCapabilityModelResult:
+    """Outputs from the IO-derived capability model."""
+
+    state_panel: pl.DataFrame
+    lambda_calibration: pl.DataFrame
+    model_report: pl.DataFrame
+    coverage_by_sector: pl.DataFrame
+    coverage_by_source: pl.DataFrame
+
+
 class CapabilityUpdater:
     """Build one-step ABM v4 general and green capability updates."""
 
@@ -93,6 +104,9 @@ class CapabilityUpdater:
         prepared = latest_state.with_columns(
             pl.coalesce(
                 [
+                    pl.col("general_capability_model")
+                    if "general_capability_model" in latest_state.columns
+                    else pl.lit(None),
                     pl.col("general_capability"),
                     pl.col("capability_export_weighted_pci"),
                     pl.col("capability_mean_pci"),
@@ -101,6 +115,9 @@ class CapabilityUpdater:
             ).alias("_cap_raw"),
             pl.coalesce(
                 [
+                    pl.col("green_capability_model")
+                    if "green_capability_model" in latest_state.columns
+                    else pl.lit(None),
                     pl.col("green_capability"),
                     pl.col("green_capability_export_share"),
                     pl.col("green_capability_share"),
@@ -116,6 +133,17 @@ class CapabilityUpdater:
         return prepared.with_columns(
             pl.col("_cap_normalized").is_null().alias("general_capability_filled"),
             pl.col("_gcap_normalized").is_null().alias("green_capability_filled"),
+            pl.col("_cap_normalized").is_null().alias("capability_model_unavailable_flag"),
+            (
+                pl.col("general_capability_source")
+                if "general_capability_source" in prepared.columns
+                else pl.lit("legacy_or_unavailable")
+            ).alias("general_capability_source"),
+            (
+                pl.col("green_capability_source")
+                if "green_capability_source" in prepared.columns
+                else pl.lit("legacy_or_unavailable")
+            ).alias("green_capability_source"),
             pl.col("_cap_normalized").fill_null(cap_median).alias("cap"),
             pl.col("_gcap_normalized").fill_null(gcap_median).alias("gcap"),
         )
@@ -279,6 +307,9 @@ class CapabilityUpdater:
             "country_sector",
             "general_capability_filled",
             "green_capability_filled",
+            "capability_model_unavailable_flag",
+            "general_capability_source",
+            "green_capability_source",
         )
         update = (
             exposure_panel.join(flags, on="country_sector", how="left")
@@ -326,6 +357,9 @@ class CapabilityUpdater:
             "gcap_next",
             "general_capability_filled",
             "green_capability_filled",
+            "capability_model_unavailable_flag",
+            "general_capability_source",
+            "green_capability_source",
             "cap_clipped",
             "gcap_clipped",
         )
@@ -373,8 +407,8 @@ class CapabilityUpdater:
                 "notes": [
                     (
                         "One-step general and green capability update. Missing capability "
-                        "stocks are filled with within-year medians for math and explicitly "
-                        "flagged. Ecosystem-specific capability stocks remain a v5 extension."
+                        "model stocks remain explicitly flagged before any within-year "
+                        "median math fallback. Ecosystem-specific capability stocks remain a v5 extension."
                     )
                 ],
             }
@@ -466,3 +500,484 @@ class CapabilityUpdater:
             )
         )
         return weighted
+
+
+class IOCapabilityBuilder:
+    """Build source-aware Atlas/IO capability model fields for ABM v4."""
+
+    def __init__(
+        self,
+        paths: ABMV4Paths,
+        start_year: int = 1995,
+        end_year: int = 2016,
+        config: CapabilityConfig | None = None,
+    ) -> None:
+        self.paths = paths
+        self.start_year = start_year
+        self.end_year = end_year
+        self.config = config or CapabilityConfig()
+
+    def load_state_panel(self) -> pl.DataFrame:
+        """Load the ABM v4 state panel."""
+        state_path = self.paths.state_panel_path(self.start_year, self.end_year)
+        if not state_path.exists():
+            raise FileNotFoundError(f"ABM v4 state panel not found: {state_path}")
+        return pl.read_parquet(state_path)
+
+    def load_supplier_weights(self) -> pl.DataFrame:
+        """Load compact updated supplier weights."""
+        if not self.paths.supplier_updated_weights_path.exists():
+            raise FileNotFoundError(
+                f"Supplier updated weights not found: {self.paths.supplier_updated_weights_path}"
+            )
+        return pl.read_parquet(self.paths.supplier_updated_weights_path)
+
+    def prepare_atlas_observed_flags(self, state_panel: pl.DataFrame) -> pl.DataFrame:
+        """Mark actual Atlas-observed capability rows, separate from model values."""
+        if "general_capability_source" in state_panel.columns:
+            general_observed = (
+                pl.col("general_capability").is_not_null()
+                & (pl.col("general_capability_source") != "io_imputed")
+                & (pl.col("general_capability_source") != "unavailable")
+            )
+        else:
+            general_observed = pl.col("general_capability").is_not_null()
+        if "green_capability_source" in state_panel.columns:
+            green_observed = (
+                pl.col("green_capability").is_not_null()
+                & (pl.col("green_capability_source") != "io_imputed")
+                & (pl.col("green_capability_source") != "unavailable")
+            )
+        else:
+            green_observed = pl.col("green_capability").is_not_null()
+        return state_panel.with_columns(
+            general_observed.alias("general_capability_atlas_observed"),
+            green_observed.alias("green_capability_atlas_observed"),
+        )
+
+    def compute_upstream_observed_capability_exposure(
+        self,
+        state_panel: pl.DataFrame,
+        supplier_weights: pl.DataFrame,
+    ) -> pl.DataFrame:
+        """Compute buyer upstream exposure using only Atlas-observed supplier capabilities."""
+        supplier_state = state_panel.select(
+            pl.col("country_sector").alias("supplier_country_sector"),
+            "Year",
+            pl.col("general_capability").alias("supplier_general_capability"),
+            pl.col("green_capability").alias("supplier_green_capability"),
+            pl.col("general_capability_atlas_observed").alias("supplier_general_observed"),
+            pl.col("green_capability_atlas_observed").alias("supplier_green_observed"),
+        )
+        buyer_years = state_panel.select(
+            pl.col("country_sector").alias("buyer_country_sector"),
+            "Year",
+        )
+        joined = (
+            buyer_years.join(supplier_weights, on="buyer_country_sector", how="left")
+            .join(supplier_state, on=["supplier_country_sector", "Year"], how="left")
+        )
+        general = self._weighted_exposure(
+            joined.filter(pl.col("supplier_general_observed")),
+            group_columns=("buyer_country_sector", "Year"),
+            weight_column="updated_weight",
+            value_column="supplier_general_capability",
+            exposure_column="general_capability_io_upstream",
+            coverage_column="general_capability_upstream_coverage",
+        )
+        green = self._weighted_exposure(
+            joined.filter(pl.col("supplier_green_observed")),
+            group_columns=("buyer_country_sector", "Year"),
+            weight_column="updated_weight",
+            value_column="supplier_green_capability",
+            exposure_column="green_capability_io_upstream",
+            coverage_column="green_capability_upstream_coverage",
+        )
+        return (
+            state_panel.select("country_sector", "Year")
+            .join(
+                general.rename({"buyer_country_sector": "country_sector"}),
+                on=["country_sector", "Year"],
+                how="left",
+            )
+            .join(
+                green.rename({"buyer_country_sector": "country_sector"}),
+                on=["country_sector", "Year"],
+                how="left",
+            )
+        )
+
+    def compute_downstream_observed_capability_exposure(
+        self,
+        state_panel: pl.DataFrame,
+        supplier_weights: pl.DataFrame,
+    ) -> pl.DataFrame:
+        """Compute downstream exposure from compact buyer links as downstream sales-share proxy."""
+        buyer_state = state_panel.select(
+            pl.col("country_sector").alias("buyer_country_sector"),
+            "Year",
+            pl.col("general_capability").alias("buyer_general_capability"),
+            pl.col("green_capability").alias("buyer_green_capability"),
+            pl.col("general_capability_atlas_observed").alias("buyer_general_observed"),
+            pl.col("green_capability_atlas_observed").alias("buyer_green_observed"),
+        )
+        years = state_panel.select("Year").unique()
+        downstream_links = (
+            supplier_weights.join(years, how="cross")
+            .with_columns(
+                (
+                    pl.col("updated_weight")
+                    / pl.col("updated_weight").sum().over(["supplier_country_sector", "Year"])
+                ).alias("downstream_sales_share")
+            )
+            .join(buyer_state, on=["buyer_country_sector", "Year"], how="left")
+        )
+        general = self._weighted_exposure(
+            downstream_links.filter(pl.col("buyer_general_observed")),
+            group_columns=("supplier_country_sector", "Year"),
+            weight_column="downstream_sales_share",
+            value_column="buyer_general_capability",
+            exposure_column="general_capability_io_downstream",
+            coverage_column="general_capability_downstream_coverage",
+        )
+        green = self._weighted_exposure(
+            downstream_links.filter(pl.col("buyer_green_observed")),
+            group_columns=("supplier_country_sector", "Year"),
+            weight_column="downstream_sales_share",
+            value_column="buyer_green_capability",
+            exposure_column="green_capability_io_downstream",
+            coverage_column="green_capability_downstream_coverage",
+        )
+        return (
+            state_panel.select("country_sector", "Year")
+            .join(
+                general.rename({"supplier_country_sector": "country_sector"}),
+                on=["country_sector", "Year"],
+                how="left",
+            )
+            .join(
+                green.rename({"supplier_country_sector": "country_sector"}),
+                on=["country_sector", "Year"],
+                how="left",
+            )
+        )
+
+    def calibrate_lambda(
+        self,
+        exposure_panel: pl.DataFrame,
+        capability_type: str,
+    ) -> tuple[float, pl.DataFrame]:
+        """Grid-search lambda_up using Atlas-observed nodes."""
+        value_column = f"{capability_type}_capability"
+        observed_column = f"{capability_type}_capability_atlas_observed"
+        up_column = f"{capability_type}_capability_io_upstream"
+        down_column = f"{capability_type}_capability_io_downstream"
+        valid = exposure_panel.filter(
+            pl.col(observed_column)
+            & pl.col(value_column).is_not_null()
+            & pl.col(up_column).is_not_null()
+            & pl.col(down_column).is_not_null()
+            & pl.col(value_column).is_finite()
+            & pl.col(up_column).is_finite()
+            & pl.col(down_column).is_finite()
+        )
+        if valid.is_empty():
+            return 1.0, pl.DataFrame(
+                {
+                    "capability_type": [capability_type],
+                    "lambda_up": [1.0],
+                    "lambda_down": [0.0],
+                    "mae": [None],
+                    "rmse": [None],
+                    "train_or_validation": ["fallback_upstream_only"],
+                    "observations": [0],
+                    "selected": [True],
+                }
+            )
+        lambdas = [
+            round(index * self.config.io_capability_lambda_grid_step, 10)
+            for index in range(int(1 / self.config.io_capability_lambda_grid_step) + 1)
+        ]
+        rows = []
+        for lambda_up in lambdas:
+            scored = valid.with_columns(
+                (
+                    lambda_up * pl.col(up_column)
+                    + (1 - lambda_up) * pl.col(down_column)
+                ).alias("_pred")
+            ).with_columns((pl.col("_pred") - pl.col(value_column)).alias("_err"))
+            mae = scored["_err"].abs().mean()
+            rmse = math.sqrt(scored.select((pl.col("_err") ** 2).mean()).item())
+            rows.append(
+                {
+                    "capability_type": capability_type,
+                    "lambda_up": lambda_up,
+                    "lambda_down": 1 - lambda_up,
+                    "mae": mae,
+                    "rmse": rmse,
+                    "train_or_validation": "all_observed",
+                    "observations": valid.height,
+                    "selected": False,
+                }
+            )
+        calibration = pl.DataFrame(rows)
+        best = calibration.sort(["mae", "rmse", "lambda_up"]).row(0, named=True)
+        selected_lambda = float(best["lambda_up"])
+        calibration = calibration.with_columns(
+            (pl.col("lambda_up") == selected_lambda).alias("selected")
+        )
+        return selected_lambda, calibration
+
+    def compute_io_capability(
+        self,
+        exposure_panel: pl.DataFrame,
+        lambda_general_up: float,
+        lambda_green_up: float,
+    ) -> pl.DataFrame:
+        """Compute calibrated IO capability values and coverage."""
+        return exposure_panel.with_columns(
+            (
+                lambda_general_up * pl.col("general_capability_io_upstream")
+                + (1 - lambda_general_up) * pl.col("general_capability_io_downstream")
+            ).alias("_general_io_both"),
+            (
+                lambda_green_up * pl.col("green_capability_io_upstream")
+                + (1 - lambda_green_up) * pl.col("green_capability_io_downstream")
+            ).alias("_green_io_both"),
+            (
+                lambda_general_up * pl.col("general_capability_upstream_coverage").fill_null(0.0)
+                + (1 - lambda_general_up)
+                * pl.col("general_capability_downstream_coverage").fill_null(0.0)
+            ).alias("general_capability_io_coverage"),
+            (
+                lambda_green_up * pl.col("green_capability_upstream_coverage").fill_null(0.0)
+                + (1 - lambda_green_up)
+                * pl.col("green_capability_downstream_coverage").fill_null(0.0)
+            ).alias("green_capability_io_coverage"),
+        ).with_columns(
+            pl.coalesce(["_general_io_both", "general_capability_io_upstream"]).alias(
+                "general_capability_io"
+            ),
+            pl.coalesce(["_green_io_both", "green_capability_io_upstream"]).alias(
+                "green_capability_io"
+            ),
+        ).with_columns(
+            pl.col("general_capability_io").fill_nan(None),
+            pl.col("green_capability_io").fill_nan(None),
+            pl.col("general_capability_io_coverage").fill_nan(None),
+            pl.col("green_capability_io_coverage").fill_nan(None),
+        ).drop(["_general_io_both", "_green_io_both"])
+
+    def assign_capability_model(self, panel: pl.DataFrame) -> pl.DataFrame:
+        """Assign Atlas, IO-imputed, or unavailable capability model values."""
+        gamma = self.config.io_capability_min_coverage
+        return panel.with_columns(
+            pl.when(pl.col("general_capability_atlas_observed"))
+            .then(pl.col("general_capability"))
+            .when(
+                pl.col("general_capability_io").is_not_null()
+                & (pl.col("general_capability_io_coverage") >= gamma)
+            )
+            .then(pl.col("general_capability_io"))
+            .otherwise(None)
+            .alias("general_capability_model"),
+            pl.when(pl.col("green_capability_atlas_observed"))
+            .then(pl.col("green_capability"))
+            .when(
+                pl.col("green_capability_io").is_not_null()
+                & (pl.col("green_capability_io_coverage") >= gamma)
+            )
+            .then(pl.col("green_capability_io"))
+            .otherwise(None)
+            .alias("green_capability_model"),
+            pl.when(pl.col("general_capability_atlas_observed"))
+            .then(pl.lit("atlas_observed"))
+            .when(
+                pl.col("general_capability_io").is_not_null()
+                & (pl.col("general_capability_io_coverage") >= gamma)
+            )
+            .then(pl.lit("io_imputed"))
+            .otherwise(pl.lit("unavailable"))
+            .alias("general_capability_source"),
+            pl.when(pl.col("green_capability_atlas_observed"))
+            .then(pl.lit("atlas_observed"))
+            .when(
+                pl.col("green_capability_io").is_not_null()
+                & (pl.col("green_capability_io_coverage") >= gamma)
+            )
+            .then(pl.lit("io_imputed"))
+            .otherwise(pl.lit("unavailable"))
+            .alias("green_capability_source"),
+        )
+
+    def build_io_capability_report(
+        self,
+        panel: pl.DataFrame,
+        lambda_general_up: float,
+        lambda_green_up: float,
+    ) -> pl.DataFrame:
+        """Build a one-row IO capability model report."""
+        selected_year = panel["Year"].max()
+        latest = panel.filter(pl.col("Year") == selected_year)
+        return pl.DataFrame(
+            {
+                "selected_year": [selected_year],
+                "node_count": [latest.height],
+                "atlas_observed_general_count": [
+                    latest.filter(pl.col("general_capability_source") == "atlas_observed").height
+                ],
+                "io_imputed_general_count": [
+                    latest.filter(pl.col("general_capability_source") == "io_imputed").height
+                ],
+                "unavailable_general_count": [
+                    latest.filter(pl.col("general_capability_source") == "unavailable").height
+                ],
+                "atlas_observed_green_count": [
+                    latest.filter(pl.col("green_capability_source") == "atlas_observed").height
+                ],
+                "io_imputed_green_count": [
+                    latest.filter(pl.col("green_capability_source") == "io_imputed").height
+                ],
+                "unavailable_green_count": [
+                    latest.filter(pl.col("green_capability_source") == "unavailable").height
+                ],
+                "selected_lambda_general_up": [lambda_general_up],
+                "selected_lambda_green_up": [lambda_green_up],
+                "mean_general_io_coverage": [latest["general_capability_io_coverage"].mean()],
+                "mean_green_io_coverage": [latest["green_capability_io_coverage"].mean()],
+                "min_coverage_threshold": [self.config.io_capability_min_coverage],
+                "downstream_available": [self.config.io_capability_use_downstream],
+                "notes": [
+                    "IO-imputed capability is a network-embedded proxy, not observed Atlas capability. Downstream uses compact supplier-weight buyer links as a v4 proxy."
+                ],
+            }
+        )
+
+    def build_coverage_by_sector(self, panel: pl.DataFrame) -> pl.DataFrame:
+        """Summarize source shares and coverage by sector for the latest year."""
+        latest = panel.filter(pl.col("Year") == panel["Year"].max())
+        return (
+            latest.group_by("Sector")
+            .agg(
+                pl.len().alias("rows"),
+                (pl.col("general_capability_source") == "atlas_observed").mean().alias(
+                    "atlas_observed_general_share"
+                ),
+                (pl.col("general_capability_source") == "io_imputed").mean().alias(
+                    "io_imputed_general_share"
+                ),
+                (pl.col("general_capability_source") == "unavailable").mean().alias(
+                    "unavailable_general_share"
+                ),
+                (pl.col("green_capability_source") == "atlas_observed").mean().alias(
+                    "atlas_observed_green_share"
+                ),
+                (pl.col("green_capability_source") == "io_imputed").mean().alias(
+                    "io_imputed_green_share"
+                ),
+                (pl.col("green_capability_source") == "unavailable").mean().alias(
+                    "unavailable_green_share"
+                ),
+                pl.col("general_capability_io_coverage").mean().alias(
+                    "mean_general_io_coverage"
+                ),
+                pl.col("green_capability_io_coverage").mean().alias(
+                    "mean_green_io_coverage"
+                ),
+            )
+            .sort("Sector")
+        )
+
+    def build_coverage_by_source(self, panel: pl.DataFrame) -> pl.DataFrame:
+        """Summarize model capability values by source."""
+        latest = panel.filter(pl.col("Year") == panel["Year"].max())
+        rows = []
+        for capability_type in ("general", "green"):
+            source_col = f"{capability_type}_capability_source"
+            value_col = f"{capability_type}_capability_model"
+            coverage_col = f"{capability_type}_capability_io_coverage"
+            total = latest.height
+            for source in ("atlas_observed", "io_imputed", "unavailable"):
+                subset = latest.filter(pl.col(source_col) == source)
+                rows.append(
+                    {
+                        "capability_type": capability_type,
+                        "source": source,
+                        "rows": subset.height,
+                        "share": subset.height / total if total else 0.0,
+                        "mean_value": subset[value_col].mean() if subset.height else None,
+                        "median_value": subset[value_col].median() if subset.height else None,
+                        "mean_coverage": subset[coverage_col].mean() if subset.height else None,
+                    }
+                )
+        return pl.DataFrame(rows)
+
+    def build_io_capability_model(self) -> IOCapabilityModelResult:
+        """Build state-panel capability model fields and diagnostics."""
+        state = self.prepare_atlas_observed_flags(self.load_state_panel())
+        weights = self.load_supplier_weights()
+        upstream = self.compute_upstream_observed_capability_exposure(state, weights)
+        downstream = self.compute_downstream_observed_capability_exposure(state, weights)
+        exposure = (
+            state.join(upstream, on=["country_sector", "Year"], how="left")
+            .join(downstream, on=["country_sector", "Year"], how="left")
+        )
+        lambda_general, calibration_general = self.calibrate_lambda(exposure, "general")
+        lambda_green, calibration_green = self.calibrate_lambda(exposure, "green")
+        modeled = self.compute_io_capability(exposure, lambda_general, lambda_green)
+        modeled = self.assign_capability_model(modeled)
+        calibration = pl.concat([calibration_general, calibration_green], how="vertical")
+        return IOCapabilityModelResult(
+            state_panel=modeled,
+            lambda_calibration=calibration,
+            model_report=self.build_io_capability_report(modeled, lambda_general, lambda_green),
+            coverage_by_sector=self.build_coverage_by_sector(modeled),
+            coverage_by_source=self.build_coverage_by_source(modeled),
+        )
+
+    def write_outputs(self, result: IOCapabilityModelResult) -> None:
+        """Write the IO capability model fields and diagnostics."""
+        self.paths.inputs.mkdir(parents=True, exist_ok=True)
+        self.paths.diagnostics.mkdir(parents=True, exist_ok=True)
+        result.state_panel.write_parquet(self.paths.state_panel_path(self.start_year, self.end_year))
+        result.lambda_calibration.write_csv(self.paths.io_capability_lambda_calibration_path)
+        result.model_report.write_csv(self.paths.io_capability_model_report_path)
+        result.coverage_by_sector.write_csv(self.paths.io_capability_coverage_by_sector_path)
+        result.coverage_by_source.write_csv(self.paths.io_capability_coverage_by_source_path)
+
+    def _weighted_exposure(
+        self,
+        frame: pl.DataFrame,
+        group_columns: tuple[str, str],
+        weight_column: str,
+        value_column: str,
+        exposure_column: str,
+        coverage_column: str,
+    ) -> pl.DataFrame:
+        if frame.is_empty():
+            return pl.DataFrame(
+                {
+                    group_columns[0]: [],
+                    group_columns[1]: [],
+                    exposure_column: [],
+                    coverage_column: [],
+                }
+            )
+        return (
+            frame.group_by(list(group_columns))
+            .agg(
+                (pl.col(weight_column) * pl.col(value_column)).sum().alias("_weighted_sum"),
+                pl.col(weight_column).sum().alias(coverage_column),
+            )
+            .with_columns(
+                pl.when(pl.col(coverage_column) > 0)
+                .then(pl.col("_weighted_sum") / pl.col(coverage_column))
+                .otherwise(None)
+                .alias(exposure_column)
+            )
+            .with_columns(
+                pl.col(exposure_column).fill_nan(None),
+                pl.col(coverage_column).fill_nan(None),
+            )
+            .drop("_weighted_sum")
+        )

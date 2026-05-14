@@ -741,6 +741,115 @@ Recommended follow-up before or during multi-year simulation design:
 - Consider sector-level imputation rules that are explicit and theoretically motivated rather than hidden fills.
 - Keep the current median fill flags in capability dynamics until a better capability source or sector-specific proxy is approved.
 
+## Phase 9C IO-Derived Capability Proxy
+
+ABM v4 now uses a tiered capability measurement model instead of treating median-filled missing capability values as equivalent to observed Atlas capability.
+
+Reason for the change:
+
+- Atlas capability data measure product/export capabilities.
+- Eora includes many sectors where product-space capability is structurally unavailable or conceptually weak, especially services, public/social sectors, households, and residual sectors.
+- Median filling is useful as a numerical fallback, but it is not a defensible measurement layer for transition dynamics.
+
+Tiered capability model:
+
+```text
+Cap_model_{i,t} =
+    Atlas capability, if observed;
+    IO-imputed capability, if Atlas is structurally missing and IO coverage is sufficient;
+    unavailable, otherwise.
+```
+
+The same structure is used for green capability. IO-imputed capability is a network-embedded productive capability proxy, not an observed Atlas value.
+
+IO exposure equations:
+
+```text
+Cap_up_i =
+sum_j w_in_{j,i} * I_Atlas_j * Cap_Atlas_j
+/
+sum_j w_in_{j,i} * I_Atlas_j
+
+Cap_down_i =
+sum_k w_out_{i,k} * I_Atlas_k * Cap_Atlas_k
+/
+sum_k w_out_{i,k} * I_Atlas_k
+
+Cap_IO_i =
+lambda_up * Cap_up_i
++ (1 - lambda_up) * Cap_down_i
+```
+
+Green capability uses the same structure with green Atlas capability. In this v4 implementation, upstream exposure uses compact `supplier_updated_weights.parquet`. Downstream exposure uses compact supplier-weight buyer links as a sales-share proxy rather than scanning the full raw-T edge panel. This avoids all-to-all construction and keeps Phase 9C model-usable; raw-T downstream aggregation remains a future refinement.
+
+Calibration:
+
+- Lambda is calibrated separately for general and green capability.
+- Grid: 0.00, 0.05, ..., 1.00.
+- Loss: mean absolute error against Atlas-observed nodes, with RMSE also reported.
+- Minimum IO coverage threshold: 0.3.
+
+Generated outputs:
+
+```text
+data/abm_v4/diagnostics/io_capability_lambda_calibration.csv
+data/abm_v4/diagnostics/io_capability_model_report.csv
+data/abm_v4/diagnostics/io_capability_coverage_by_sector.csv
+data/abm_v4/diagnostics/io_capability_coverage_by_source.csv
+```
+
+Real-data result for 2016:
+
+| Capability type | atlas_observed | io_imputed | unavailable | selected lambda_up | selected lambda_down |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| General | 2,924 | 1,548 | 443 | 0.35 | 0.65 |
+| Green | 2,924 | 1,316 | 675 | 0.0 | 1.0 |
+
+Calibration diagnostics:
+
+- General selected MAE: 0.407775861953647
+- General selected RMSE: 0.5757752863611213
+- Green selected MAE: 0.08823890550156885
+- Green selected RMSE: 0.1592492542158855
+- Calibration observations: 59,956 for both general and green.
+
+Coverage and source shares:
+
+- General atlas-observed share: 0.5949135300101729
+- General IO-imputed share: 0.3149542217700916
+- General unavailable share: 0.0901322482197355
+- Green atlas-observed share: 0.5949135300101729
+- Green IO-imputed share: 0.2677517802644964
+- Green unavailable share: 0.1373346897253306
+- Mean general IO coverage: 0.6161243728217841
+- Mean green IO coverage: 0.5319672919937847
+
+Impact on Phase 5 capability update:
+
+- General capability fill share fell from 0.40508646998982706 to 0.0901322482197355.
+- Green capability fill share fell from 0.40508646998982706 to 0.1373346897253306.
+- Mean cap after source-aware model: 0.6652630986290047.
+- Mean gcap after source-aware model: 0.08167427279197137.
+- Mean delta cap: 0.01122678462293864.
+- Mean delta gcap: 0.00804949815956165.
+
+Impact on emissions readiness:
+
+- The capability update now prefers `general_capability_model` and `green_capability_model`.
+- Emissions readiness uses `cap_next` and `gcap_next` produced from the source-aware capability model.
+- Frontier-gap emissions update remains valid: mean `rEI_used` is 0.04637543051620834, aggregate delta emissions is -2,073,630.0784223452, decomposition residual is 0.000000010943040251731873, and `bad_transition_flag` is false.
+
+One-step base validation after Phase 9C:
+
+- Overall status: warning
+- Failed layers: none
+- Warning layers: supplier, production, emissions
+- Capability layer now passes without warning.
+
+Caveat:
+
+- IO-imputed capability is a model-derived proxy for network-embedded productive capability. It is not observed Atlas product-space capability and should remain source-labeled throughout simulation and diagnostics.
+
 ## Extension from ABM v3
 
 ABM v4 introduces a separate namespace and output root. It can inspect ABM v3 outputs as preferred inputs, but writes only under `data/abm_v4/` when explicitly run.

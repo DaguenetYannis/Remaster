@@ -4,7 +4,7 @@ import argparse
 
 import polars as pl
 
-from src.abm_v4.capabilities import CapabilityUpdater
+from src.abm_v4.capabilities import CapabilityUpdater, IOCapabilityBuilder
 from src.abm_v4.config import ABMV4Config
 from src.abm_v4.diagnostics import build_path_audit_rows, format_path_audit_table
 from src.abm_v4.ecosystem import EcosystemMapper
@@ -102,6 +102,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--repair-capability-coverage",
         action="store_true",
         help="Repair ABM v4 state capability coverage by joining Atlas capability data.",
+    )
+    parser.add_argument(
+        "--build-io-capability-model",
+        action="store_true",
+        help="Build Phase 9C source-aware Atlas/IO capability model fields.",
     )
     parser.add_argument(
         "--force-rebuild-raw-t-edges",
@@ -228,6 +233,29 @@ def main() -> None:
         )
         print(f"Updated state panel path: {paths.state_panel_path(config.start_year, config.end_year)}")
         print(f"Capability join report path: {paths.capability_join_report_path}")
+        return
+
+    if args.build_io_capability_model:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--build-io-capability-model requires --create-output-dirs to write outputs."
+            )
+        builder = IOCapabilityBuilder(
+            paths=paths,
+            start_year=config.start_year,
+            end_year=config.end_year,
+            config=config.capability,
+        )
+        result = builder.build_io_capability_model()
+        builder.write_outputs(result)
+        report_row = result.model_report.to_dicts()[0]
+        print("Built IO-derived capability model.")
+        print(f"Selected year: {report_row['selected_year']}")
+        print(f"General IO-imputed count: {report_row['io_imputed_general_count']}")
+        print(f"Green IO-imputed count: {report_row['io_imputed_green_count']}")
+        print(f"Selected lambda general up: {report_row['selected_lambda_general_up']}")
+        print(f"Selected lambda green up: {report_row['selected_lambda_green_up']}")
+        print(f"IO capability model report path: {paths.io_capability_model_report_path}")
         return
 
     if args.build_supplier_edges:

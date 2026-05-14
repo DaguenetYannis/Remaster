@@ -40,6 +40,12 @@ class CapabilityConfig:
     k_gcap: float = 5.0
     tau_cap: float = 0.5
     tau_gcap: float = 0.5
+    io_capability_lambda_grid_step: float = 0.05
+    io_capability_min_coverage: float = 0.3
+    io_capability_validation_share: float = 0.2
+    io_capability_random_seed: int = 42
+    io_capability_use_downstream: bool = True
+    io_capability_source_priority: str = "atlas_then_io"
 
 
 @dataclass(frozen=True)

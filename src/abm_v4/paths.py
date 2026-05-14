@@ -193,6 +193,22 @@ class ABMV4Paths:
         return self.diagnostics / "capability_coverage_by_sector.csv"
 
     @property
+    def io_capability_lambda_calibration_path(self) -> Path:
+        return self.diagnostics / "io_capability_lambda_calibration.csv"
+
+    @property
+    def io_capability_model_report_path(self) -> Path:
+        return self.diagnostics / "io_capability_model_report.csv"
+
+    @property
+    def io_capability_coverage_by_sector_path(self) -> Path:
+        return self.diagnostics / "io_capability_coverage_by_sector.csv"
+
+    @property
+    def io_capability_coverage_by_source_path(self) -> Path:
+        return self.diagnostics / "io_capability_coverage_by_source.csv"
+
+    @property
     def production_feasibility_report_path(self) -> Path:
         return self.diagnostics / "production_feasibility_report.csv"
 
