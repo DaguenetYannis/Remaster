@@ -46,6 +46,24 @@ class CapabilityConfig:
 class EmissionsConfig:
     """Emissions intensity update parameters."""
 
+    emissions_transition_mode: str = "frontier_gap_readiness"
+    ei_frontier_quantile: float = 0.25
+    ei_frontier_group: str = "sector_year"
+    min_frontier_nodes: int = 5
+    rho_max: float = 0.08
+    theta_intercept: float = -1.0
+    theta_gcap: float = 1.0
+    theta_cap: float = 0.5
+    theta_network_green: float = 0.5
+    theta_ecosystem_exposure: float = 0.25
+    theta_brown_centrality: float = 0.75
+    theta_supplier_lockin: float = 0.5
+    tau_gap: float = 1.0
+    use_sector_background_trend: bool = True
+    sector_background_fallback: float = 0.0
+    rEI_min: float = -0.05
+    rEI_max: float = 0.10
+    clip_rEI: bool = True
     beta_0: float = 0.0
     beta_log_ei: float = 0.05
     beta_green_capability: float = 0.10

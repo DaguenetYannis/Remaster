@@ -149,6 +149,10 @@ class ABMV4Paths:
         return self.interim / "production_feasibility_panel.parquet"
 
     @property
+    def emissions_update_panel_path(self) -> Path:
+        return self.interim / "emissions_update_panel.parquet"
+
+    @property
     def supplier_edge_report_path(self) -> Path:
         return self.diagnostics / "supplier_edge_report.csv"
 
@@ -179,6 +183,38 @@ class ABMV4Paths:
     @property
     def production_feasibility_report_path(self) -> Path:
         return self.diagnostics / "production_feasibility_report.csv"
+
+    @property
+    def emissions_update_report_path(self) -> Path:
+        return self.diagnostics / "emissions_update_report.csv"
+
+    @property
+    def emissions_historical_rEI_summary_path(self) -> Path:
+        return self.diagnostics / "emissions_historical_rEI_summary.csv"
+
+    @property
+    def emissions_sector_background_trend_path(self) -> Path:
+        return self.diagnostics / "emissions_sector_background_trend.csv"
+
+    @property
+    def emissions_frontier_gap_report_path(self) -> Path:
+        return self.diagnostics / "emissions_frontier_gap_report.csv"
+
+    @property
+    def emissions_transition_comparison_path(self) -> Path:
+        return self.diagnostics / "emissions_transition_comparison.csv"
+
+    @property
+    def one_step_base_validation_report_csv_path(self) -> Path:
+        return self.validation / "one_step_base_validation_report.csv"
+
+    @property
+    def one_step_base_validation_report_md_path(self) -> Path:
+        return self.validation / "one_step_base_validation_report.md"
+
+    @property
+    def one_step_base_status_json_path(self) -> Path:
+        return self.validation / "one_step_base_status.json"
 
     @property
     def supplier_edge_schema_report_path(self) -> Path:

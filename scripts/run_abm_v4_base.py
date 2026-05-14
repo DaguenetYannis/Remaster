@@ -8,9 +8,10 @@ from src.abm_v4.capabilities import CapabilityUpdater
 from src.abm_v4.config import ABMV4Config
 from src.abm_v4.diagnostics import build_path_audit_rows, format_path_audit_table
 from src.abm_v4.ecosystem import EcosystemMapper
+from src.abm_v4.emissions import EmissionsUpdater
 from src.abm_v4.paths import ABMV4Paths
 from src.abm_v4.production import ProductionFeasibilityEngine
-from src.abm_v4.simulation import inspect_base_model_readiness
+from src.abm_v4.simulation import inspect_base_model_readiness, run_one_step_base_orchestration
 from src.abm_v4.state import build_state_panel
 from src.abm_v4.suppliers import SupplierNetworkBuilder
 
@@ -75,6 +76,37 @@ def build_parser() -> argparse.ArgumentParser:
         "--build-production-feasibility",
         action="store_true",
         help="Build Phase 6 one-step production feasibility diagnostics.",
+    )
+    parser.add_argument(
+        "--build-emissions-update",
+        action="store_true",
+        help="Build Phase 7 one-step emissions intensity update and decomposition.",
+    )
+    parser.add_argument(
+        "--emissions-transition-mode",
+        choices=("frontier_gap_readiness", "legacy_raw_log"),
+        default=None,
+        help="Emissions transition rule to use for --build-emissions-update.",
+    )
+    parser.add_argument(
+        "--build-emissions-transition-comparison",
+        action="store_true",
+        help="Compare frontier-gap readiness emissions transition with legacy raw-log mode.",
+    )
+    parser.add_argument(
+        "--run-one-step-base",
+        action="store_true",
+        help="Run Phase 8 one-step ABM v4 base orchestration and validation.",
+    )
+    parser.add_argument(
+        "--force-rebuild-raw-t-edges",
+        action="store_true",
+        help="Allow a one-step base run to rebuild raw T edges if that path is implemented.",
+    )
+    parser.add_argument(
+        "--reuse-existing",
+        action="store_true",
+        help="Reuse existing compatible ABM v4 component outputs during one-step orchestration.",
     )
     parser.add_argument(
         "--candidate-debug-buyers",
@@ -366,6 +398,92 @@ def main() -> None:
         print(f"Constrained node share: {report_row['share_nodes_with_input_feasibility_below_1']}")
         print(f"Production feasibility path: {paths.production_feasibility_panel_path}")
         print(f"Production feasibility report path: {paths.production_feasibility_report_path}")
+        return
+
+    if args.build_emissions_update:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--build-emissions-update requires --create-output-dirs to write outputs."
+            )
+        updater = EmissionsUpdater(
+            paths=paths,
+            start_year=config.start_year,
+            end_year=config.end_year,
+            config=config.emissions,
+            transition_mode=args.emissions_transition_mode,
+        )
+        (
+            panel,
+            report,
+            decomposition,
+            historical_summary,
+            sector_background,
+            frontier_gap_report,
+        ) = updater.build_emissions_update()
+        updater.write_outputs(
+            panel,
+            report,
+            decomposition,
+            historical_summary,
+            sector_background,
+            frontier_gap_report,
+        )
+        report_row = report.to_dicts()[0]
+        print("Built emissions update.")
+        print(f"Transition mode: {report_row['emissions_transition_mode']}")
+        print(f"Year: {report_row['year']}")
+        print(f"Valid EI nodes: {report_row['valid_EI_nodes']}")
+        print(f"Invalid EI nodes: {report_row['invalid_EI_nodes']}")
+        print(f"Mean rEI used: {report_row['mean_rEI_used']}")
+        print(f"Aggregate delta emissions: {report_row['aggregate_delta_emissions']}")
+        print(f"Bad transition flag: {report_row['bad_transition_flag']}")
+        print(f"Emissions update path: {paths.emissions_update_panel_path}")
+        print(f"Emissions update report path: {paths.emissions_update_report_path}")
+        print(f"Emissions decomposition path: {paths.emissions_decomposition_base_path}")
+        return
+
+    if args.build_emissions_transition_comparison:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--build-emissions-transition-comparison requires --create-output-dirs to write outputs."
+            )
+        updater = EmissionsUpdater(
+            paths=paths,
+            start_year=config.start_year,
+            end_year=config.end_year,
+            config=config.emissions,
+        )
+        comparison = updater.build_transition_comparison()
+        updater.write_transition_comparison(comparison)
+        print("Built emissions transition comparison.")
+        print(f"Comparison path: {paths.emissions_transition_comparison_path}")
+        for row in comparison.to_dicts():
+            print(
+                f"{row['mode']}: mean rEI={row['mean_rEI_used']}, "
+                f"delta emissions={row['aggregate_delta_emissions']}"
+            )
+        return
+
+    if args.run_one_step_base:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--run-one-step-base requires --create-output-dirs to write validation outputs."
+            )
+        result = run_one_step_base_orchestration(
+            paths=paths,
+            config=config,
+            reuse_existing=True if args.reuse_existing else True,
+            force_rebuild_raw_t_edges=args.force_rebuild_raw_t_edges,
+            write_outputs=True,
+        )
+        status = result.validation.status
+        print("Ran one-step ABM v4 base validation.")
+        print(f"Overall status: {status['overall_status']}")
+        print(f"Warning layers: {', '.join(status['warning_layers']) if status['warning_layers'] else '-'}")
+        print(f"Failed layers: {', '.join(status['failed_layers']) if status['failed_layers'] else '-'}")
+        print(f"Validation CSV: {paths.one_step_base_validation_report_csv_path}")
+        print(f"Validation Markdown: {paths.one_step_base_validation_report_md_path}")
+        print(f"Status JSON: {paths.one_step_base_status_json_path}")
         return
 
     if args.create_output_dirs:

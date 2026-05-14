@@ -486,6 +486,185 @@ Caveat:
 
 - This is a one-step feasibility diagnostic, not full recursive Leontief propagation. It does not update supplier output recursively and does not simulate emissions or scenarios.
 
+## Phase 7B Frontier-Gap Emissions-Intensity Update and Decomposition
+
+ABM v4 now builds a one-step emissions-intensity update and aggregate emissions decomposition using a sector-frontier gap-closure rule gated by transition readiness. This replaces the raw `log(EI)` rule as the default behavioural mechanism, while preserving the old rule as `legacy_raw_log` for comparison only. This phase does not implement a multi-year simulation loop or scenarios.
+
+Inputs:
+
+```text
+data/abm_v4/inputs/abm_v4_state_panel_1995_2016.parquet
+data/abm_v4/interim/capability_update_panel.parquet
+data/abm_v4/interim/production_feasibility_panel.parquet
+data/abm_v4/interim/capability_exposure_panel.parquet
+```
+
+Generated outputs:
+
+```text
+data/abm_v4/interim/emissions_update_panel.parquet
+data/abm_v4/diagnostics/emissions_update_report.csv
+data/abm_v4/diagnostics/emissions_decomposition_base.csv
+data/abm_v4/diagnostics/emissions_historical_rEI_summary.csv
+data/abm_v4/diagnostics/emissions_sector_background_trend.csv
+data/abm_v4/diagnostics/emissions_frontier_gap_report.csv
+data/abm_v4/diagnostics/emissions_transition_comparison.csv
+```
+
+Why the raw-log rule was rejected:
+
+- The previous placeholder equation used raw `log(EI)` as direct behavioural pressure.
+- Because many valid EI values are below 1, `log(EI)` is negative and can reverse the intended sign.
+- The correct behavioural object is distance from a feasible lower-carbon benchmark, not raw EI scale.
+
+Default transition equation:
+
+```text
+EI_frontier_{s,t} = Q_0.25(EI_{j,t} | sector(j) = s)
+ei_gap_i = max(0, log(EI_i) - log(EI_frontier_s))
+
+readiness_i =
+rho_max * sigmoid(
+    theta_0
+    + theta_gcap * gcap_next_i
+    + theta_cap * cap_next_i
+    + theta_network * network_green_exposure_i
+    + theta_eco * ecosystem_capability_exposure_i
+    - theta_brown * brown_centrality_i
+    - theta_lockin * supplier_lockin_i
+)
+
+gap_closure_potential_i =
+readiness_i * ei_gap_i / (ei_gap_i + tau_gap)
+
+rEI_used_i =
+sector_background_trend_s + gap_closure_potential_i
+
+EI_next_i = EI_i * exp(-rEI_used_i)
+```
+
+Selected frontier definition:
+
+- Sector-year 25th percentile of valid positive EI.
+- Sectors with fewer than 5 valid EI nodes use the global year frontier.
+- 26 sectors used sector frontiers; 1 sector used the global fallback.
+
+Readiness variables:
+
+- `gcap_next`
+- `cap_next`
+- `network_green_exposure`
+- `ecosystem_capability_exposure`
+- `brown_centrality`
+- `supplier_lockin`, computed as the Herfindahl concentration of updated supplier weights.
+
+Historical observed rEI summary:
+
+- Valid consecutive positive-EI observations: 96,803
+- Mean historical observed rEI: 0.036876130454566405
+- Median historical observed rEI: 0.035605709216913084
+- p05 / p95: -0.27640050238653835 / 0.32818744389233334
+- Share positive: 0.6062622026176875
+- Share negative: 0.3937377973823125
+
+Real-data frontier-gap emissions update summary:
+
+- Selected year: 2016
+- Node count: 4,915
+- Valid EI nodes: 4,620
+- Invalid EI nodes: 295
+- Mean EI gap: 0.816389623646047
+- Median EI gap: 0.6146226767682785
+- Share zero EI gap: 0.25303030303030305
+- Mean readiness: 0.03206306488288885
+- Median readiness: 0.032221009552336435
+- Mean `rEI_used`: 0.04636061610414019
+- Median `rEI_used`: 0.0465575247340423
+- Share negative `rEI_used`: 0.0
+- EI clipped count: 0
+- Total current emissions: 41,772,432.079139076
+- Total feasible-output current-EI emissions: 41,772,432.079137705
+- Total next emissions: 39,716,544.72864129
+- Aggregate delta emissions: -2,055,887.3504977897
+
+Aggregate decomposition:
+
+- Production-scale effect: -0.0000013755655184814115
+- Emissions-intensity effect: -2,055,887.3504964742
+- Interaction effect: 0.00000007123719683228708
+- Decomposition residual: -0.000000011175870895385742
+- Bad transition flag: false
+
+Legacy comparison:
+
+- `frontier_gap_readiness`: mean `rEI_used` 0.04636061610414019; median 0.0465575247340423; total next emissions 39,716,544.728641294; aggregate delta emissions -2,055,887.3504977748.
+- `legacy_raw_log`: mean `rEI_used` -0.0499693646611653; median -0.05; total next emissions 43,902,716.64668248; aggregate delta emissions 2,130,284.5675434023.
+- The legacy rule is retained only as a comparison mode because raw `log(EI)` is not a stable theoretical pressure for decarbonization.
+
+Method:
+
+- Emissions identity is kept explicit: `E = X * EI`.
+- Invalid or non-positive EI values are not repaired; `rEI_used` and `EI_next` are missing for invalid rows and those rows are excluded from aggregate emissions decomposition.
+- `EI_next = max(EI_min, EI * exp(-rEI_used))` for valid EI rows.
+- The decomposition separates production-scale, emissions-intensity, and interaction effects at node level before aggregation.
+
+Caveat:
+
+- The frontier-gap readiness parameters are conservative one-step diagnostic defaults, not calibrated historical parameters. The rule is theoretically safer than raw `log(EI)`, but it is not yet a fully calibrated historical transition model and is not a multi-year simulation or scenario run.
+
+## Phase 8 One-Step Base Orchestration
+
+ABM v4 now has a one-step base orchestration and validation layer. This phase reuses the existing Phase 2 through Phase 7B outputs, checks that they are compatible, and writes a consolidated validation report. It does not run a multi-year dynamic simulation, does not create scenarios, and does not create projection outputs.
+
+Command:
+
+```powershell
+python scripts/run_abm_v4_base.py --run-one-step-base --create-output-dirs --reuse-existing
+```
+
+Generated outputs:
+
+```text
+data/abm_v4/validation/one_step_base_validation_report.csv
+data/abm_v4/validation/one_step_base_validation_report.md
+data/abm_v4/validation/one_step_base_status.json
+```
+
+Integration status:
+
+- Overall status: warning
+- Overall passed: true
+- Failed layers: none
+- Warning layers: supplier, capability, production, emissions
+- Blocking issues before multi-year simulation: none from the one-step validation rules
+- Recommended next phase: Phase 9 multi-year base simulation design
+
+Layer validation table:
+
+| Layer | Status | Key metrics | Warnings |
+| --- | --- | --- | --- |
+| State | pass | 108,130 rows; 1995-2016 coverage; 4,915 country-sector nodes | none |
+| Ecosystem | pass | 4,915 mapped nodes; 0 unmapped nodes; 10 ecosystems | none |
+| Supplier | warning | raw source `raw_eora_T`; 308,920 opportunity rows; median 64 candidates per buyer; rewired buyer share 0.011190233977619531; max updated weight sum error 2.220446049250313e-16 | fallback stress was used for most buyers |
+| Capability | warning | year 2016; mean cap 0.6908553253705668; mean gcap 0.0610879717557677; mean delta cap 0.010585083349278736; mean delta gcap 0.007929139430966488 | capability fill share is above 0.25 |
+| Production | warning | aggregate feasibility ratio 0.9999378066726882; mean input feasibility 0.9995930824004696; constrained node share 0.8659206510681587; p95 supplier pressure max 0.4274605852214408 | many nodes are marginally constrained despite high aggregate feasibility |
+| Emissions | warning | mode `frontier_gap_readiness`; 4,620 valid EI nodes; 295 invalid EI nodes; mean `rEI_used` 0.04636061610414019; aggregate delta emissions -2,055,887.3504977897; decomposition residual -1.1175870895385742e-08 | invalid EI share is above 0.05 |
+
+Validation rules:
+
+- State passes if country-sector nodes are available and the selected year is covered.
+- Ecosystem passes if unmapped node count is zero.
+- Supplier passes if updated supplier weights are normalized within `1e-8`.
+- Capability passes if capability clipping counts are zero, with a warning when fill shares exceed 0.25.
+- Production passes if aggregate feasibility is above 0.95, with a warning when many nodes are constrained but aggregate feasibility remains high.
+- Emissions passes if the decomposition residual is below `1e-4` in absolute value and `bad_transition_flag` is false, with a warning when invalid EI share exceeds 0.05.
+
+Raw T rebuild behavior:
+
+- The one-step orchestrator reuses existing raw T supplier edges by default.
+- Raw T edges are not rebuilt during Phase 8 unless explicitly requested by a future rebuild path.
+- If required component outputs are missing, the orchestrator fails clearly and names the missing paths instead of silently inventing or rebuilding inputs.
+
 ## Extension from ABM v3
 
 ABM v4 introduces a separate namespace and output root. It can inspect ABM v3 outputs as preferred inputs, but writes only under `data/abm_v4/` when explicitly run.
@@ -562,6 +741,18 @@ Build one-step production feasibility diagnostics:
 
 ```powershell
 python scripts/run_abm_v4_base.py --build-production-feasibility --create-output-dirs
+```
+
+Build one-step emissions-intensity update and decomposition:
+
+```powershell
+python scripts/run_abm_v4_base.py --build-emissions-update --create-output-dirs
+```
+
+Compare default frontier-gap emissions transition with the legacy raw-log rule:
+
+```powershell
+python scripts/run_abm_v4_base.py --build-emissions-transition-comparison --create-output-dirs
 ```
 
 ## Output Root
