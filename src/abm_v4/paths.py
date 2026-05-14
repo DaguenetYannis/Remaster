@@ -181,6 +181,18 @@ class ABMV4Paths:
         return self.diagnostics / "capability_update_report.csv"
 
     @property
+    def capability_join_report_path(self) -> Path:
+        return self.diagnostics / "capability_join_report.csv"
+
+    @property
+    def capability_coverage_by_year_path(self) -> Path:
+        return self.diagnostics / "capability_coverage_by_year.csv"
+
+    @property
+    def capability_coverage_by_sector_path(self) -> Path:
+        return self.diagnostics / "capability_coverage_by_sector.csv"
+
+    @property
     def production_feasibility_report_path(self) -> Path:
         return self.diagnostics / "production_feasibility_report.csv"
 

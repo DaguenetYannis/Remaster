@@ -665,6 +665,82 @@ Raw T rebuild behavior:
 - Raw T edges are not rebuilt during Phase 8 unless explicitly requested by a future rebuild path.
 - If required component outputs are missing, the orchestrator fails clearly and names the missing paths instead of silently inventing or rebuilding inputs.
 
+## Phase 9 Atlas Capability Join Repair and Coverage Audit
+
+ABM v4 now has an explicit Atlas capability coverage repair/audit step. The repair inspects available state and Atlas capability schemas, selects explicit join keys, fills only missing canonical capability values, preserves existing non-missing canonical values, and writes coverage diagnostics. It does not run suppliers, production, emissions, scenarios, or multi-year simulation.
+
+Command:
+
+```powershell
+python scripts/run_abm_v4_base.py --repair-capability-coverage --create-output-dirs
+```
+
+Then the capability update and one-step validation were rerun:
+
+```powershell
+python scripts/run_abm_v4_base.py --build-capability-update --create-output-dirs
+python scripts/run_abm_v4_base.py --run-one-step-base --create-output-dirs --reuse-existing
+```
+
+Generated diagnostics:
+
+```text
+data/abm_v4/diagnostics/capability_join_report.csv
+data/abm_v4/diagnostics/capability_coverage_by_year.csv
+data/abm_v4/diagnostics/capability_coverage_by_sector.csv
+```
+
+Selected source and keys:
+
+- Source: `data/atlas/processed/atlas_eora26_sector_capabilities_1995_2016.parquet`
+- Selected join keys: `Country=iso3Code; Year=year; Sector=eora26_sector`
+- State rows before: 108,130
+- State rows after: 108,130
+- Matched rows: 63,905
+- Unmatched rows: 44,225
+- Matched share: 0.5910015721816332
+
+Coverage before and after:
+
+| Metric | Before | After |
+| --- | ---: | ---: |
+| General capability nonmissing rows | 63,905 | 63,905 |
+| Green capability nonmissing rows | 63,905 | 63,905 |
+| General capability missing/fill share | 0.4089984278183668 | 0.4089984278183668 |
+| Green capability missing/fill share | 0.4089984278183668 | 0.4089984278183668 |
+| 2016 general capability missing/fill share | 0.4050864699898271 | 0.4050864699898271 |
+| 2016 green capability missing/fill share | 0.4050864699898271 | 0.4050864699898271 |
+
+Outcome:
+
+- Canonical capability coverage did not improve.
+- The join itself is valid and explicit, but the matched rows were already the rows with Atlas capability data in the state panel.
+- The remaining missing rows are not recoverable from the inspected Atlas capability source with the current country-year-sector keys.
+
+Main coverage gaps by sector:
+
+- `Construction`: 100% missing general and green capability.
+- `Education, Health and Other Services`: 100% missing.
+- `Electricity, Gas and Water`: 100% missing.
+- `Fishing`: 100% missing.
+- `Maintenance and Repair`: 100% missing.
+- `Private Households`: 100% missing.
+- `Public Administration`: 100% missing.
+- `Recycling`: 100% missing.
+
+Interpretation:
+
+- The Atlas source contains explicit variables such as `capability_export_weighted_pci`, `capability_mean_pci`, `active_good_count`, `green_active_good_count`, `green_capability_share`, and `green_capability_export_share`.
+- However, Atlas goods/product capability coverage does not provide usable non-missing values for several Eora service or non-product sectors.
+- Existing non-missing state capability values were intentionally not overwritten.
+- For dynamic simulation, this remains a substantive warning: capability dynamics for the missing sectors still rely on within-year median filling in the capability update layer.
+
+Recommended follow-up before or during multi-year simulation design:
+
+- Decide whether service-sector capability should use a separate service-capability proxy.
+- Consider sector-level imputation rules that are explicit and theoretically motivated rather than hidden fills.
+- Keep the current median fill flags in capability dynamics until a better capability source or sector-specific proxy is approved.
+
 ## Extension from ABM v3
 
 ABM v4 introduces a separate namespace and output root. It can inspect ABM v3 outputs as preferred inputs, but writes only under `data/abm_v4/` when explicitly run.

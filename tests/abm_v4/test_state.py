@@ -4,7 +4,17 @@ from uuid import uuid4
 import polars as pl
 
 from src.abm_v4.paths import ABMV4Paths
-from src.abm_v4.state import build_state_panel, discover_state_source
+from src.abm_v4.state import (
+    build_capability_coverage_by_sector,
+    build_capability_coverage_by_year,
+    build_capability_join_report,
+    build_state_panel,
+    discover_state_source,
+    inspect_capability_columns,
+    join_capability_variables,
+    repair_capability_coverage,
+    select_capability_join_keys,
+)
 
 
 def toy_root() -> Path:
@@ -130,3 +140,129 @@ def test_state_builder_writes_diagnostics_only_when_enabled() -> None:
     assert not paths.simulations.exists()
     assert not paths.scenarios.exists()
     assert not paths.validation.exists()
+
+
+def toy_state_for_capability_join() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "country_sector": ["FRA|Agriculture", "DEU|Fishing", "ESP|Mining"],
+            "Year": [2016, 2016, 2016],
+            "Country": ["FRA", "DEU", "ESP"],
+            "Sector": ["Agriculture", "Fishing", "Mining"],
+            "general_capability": [None, 0.8, None],
+            "green_capability": [None, 0.2, None],
+        }
+    )
+
+
+def toy_atlas_capability_panel() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "iso3Code": ["FRA", "DEU"],
+            "year": [2016, 2016],
+            "eora26_sector": ["Agriculture", "Fishing"],
+            "capability_export_weighted_pci": [1.5, 9.9],
+            "capability_mean_pci": [1.0, 9.0],
+            "active_good_count": [5.0, 8.0],
+            "green_capability_export_share": [0.4, 0.9],
+            "green_capability_share": [0.3, 0.8],
+        }
+    )
+
+
+def test_capability_join_selects_valid_keys() -> None:
+    selected = select_capability_join_keys(
+        toy_state_for_capability_join(),
+        toy_atlas_capability_panel(),
+    )
+
+    assert selected == (
+        ("Country", "iso3Code"),
+        ("Year", "year"),
+        ("Sector", "eora26_sector"),
+    )
+
+
+def test_capability_join_improves_missingness_when_source_has_data() -> None:
+    state = toy_state_for_capability_join()
+    atlas = toy_atlas_capability_panel()
+    selected = select_capability_join_keys(state, atlas)
+
+    repaired = join_capability_variables(state, atlas, selected)
+
+    assert state["general_capability"].null_count() == 2
+    assert repaired["general_capability"].null_count() == 1
+    assert repaired["green_capability"].null_count() == 1
+
+
+def test_capability_join_preserves_existing_canonical_values() -> None:
+    state = toy_state_for_capability_join()
+    atlas = toy_atlas_capability_panel()
+    selected = select_capability_join_keys(state, atlas)
+
+    repaired = join_capability_variables(state, atlas, selected)
+    deu = repaired.filter(pl.col("Country") == "DEU").row(0, named=True)
+
+    assert deu["general_capability"] == 0.8
+    assert deu["green_capability"] == 0.2
+    assert deu["general_capability_source"] == "existing_state"
+
+
+def test_capability_join_records_sources_and_unmatched_rows() -> None:
+    state = toy_state_for_capability_join()
+    atlas = toy_atlas_capability_panel()
+    selected = select_capability_join_keys(state, atlas)
+    repaired = join_capability_variables(state, atlas, selected)
+    inspection = inspect_capability_columns(state, atlas)
+
+    report = build_capability_join_report(
+        state_before=state,
+        state_after=repaired,
+        source_file=Path("atlas.parquet"),
+        selected_join_keys=selected,
+        column_inspection=inspection,
+    )
+    row = report.to_dicts()[0]
+
+    assert row["matched_rows"] == 2
+    assert row["unmatched_rows"] == 1
+    assert "Country=iso3Code" in row["selected_join_keys"]
+    assert repaired.filter(pl.col("Country") == "FRA")["general_capability_source"].item() == "atlas_capability_join"
+
+
+def test_capability_coverage_by_year_and_sector_is_computed() -> None:
+    repaired = join_capability_variables(
+        toy_state_for_capability_join(),
+        toy_atlas_capability_panel(),
+        select_capability_join_keys(toy_state_for_capability_join(), toy_atlas_capability_panel()),
+    )
+
+    by_year = build_capability_coverage_by_year(repaired)
+    by_sector = build_capability_coverage_by_sector(repaired)
+
+    assert by_year["rows"].item() == 3
+    assert "general_capability_missing_share" in by_sector.columns
+    assert by_sector.height == 3
+
+
+def test_capability_repair_writes_only_when_enabled() -> None:
+    root = toy_root()
+    paths = ABMV4Paths(project_root=root)
+    state_path = paths.state_panel_path(1995, 2016)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    toy_state_for_capability_join().write_parquet(state_path)
+    atlas_path = paths.data_atlas / "processed" / "atlas_eora26_sector_capabilities_1995_2016.parquet"
+    atlas_path.parent.mkdir(parents=True, exist_ok=True)
+    toy_atlas_capability_panel().write_parquet(atlas_path)
+
+    no_write = repair_capability_coverage(paths, 1995, 2016, write_outputs=False)
+
+    assert no_write.output_path is None
+    assert not paths.capability_join_report_path.exists()
+
+    write_result = repair_capability_coverage(paths, 1995, 2016, write_outputs=True)
+
+    assert write_result.output_path == state_path
+    assert paths.capability_join_report_path.exists()
+    assert paths.capability_coverage_by_year_path.exists()
+    assert paths.capability_coverage_by_sector_path.exists()

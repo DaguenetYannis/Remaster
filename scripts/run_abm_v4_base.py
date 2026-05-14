@@ -12,7 +12,7 @@ from src.abm_v4.emissions import EmissionsUpdater
 from src.abm_v4.paths import ABMV4Paths
 from src.abm_v4.production import ProductionFeasibilityEngine
 from src.abm_v4.simulation import inspect_base_model_readiness, run_one_step_base_orchestration
-from src.abm_v4.state import build_state_panel
+from src.abm_v4.state import build_state_panel, repair_capability_coverage
 from src.abm_v4.suppliers import SupplierNetworkBuilder
 
 
@@ -97,6 +97,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--run-one-step-base",
         action="store_true",
         help="Run Phase 8 one-step ABM v4 base orchestration and validation.",
+    )
+    parser.add_argument(
+        "--repair-capability-coverage",
+        action="store_true",
+        help="Repair ABM v4 state capability coverage by joining Atlas capability data.",
     )
     parser.add_argument(
         "--force-rebuild-raw-t-edges",
@@ -193,6 +198,36 @@ def main() -> None:
         print(f"Mapped nodes: {report_row['mapped_nodes']}")
         print(f"Unmapped nodes: {report_row['unmapped_nodes']}")
         print(f"Ecosystem mapping path: {paths.ecosystem_mapping_path}")
+        return
+
+    if args.repair_capability_coverage:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--repair-capability-coverage requires --create-output-dirs to write outputs."
+            )
+        result = repair_capability_coverage(
+            paths=paths,
+            start_year=config.start_year,
+            end_year=config.end_year,
+            write_outputs=True,
+        )
+        report_row = result.join_report.to_dicts()[0]
+        print("Repaired ABM v4 capability coverage.")
+        print(f"Capability source: {report_row['source_file']}")
+        print(f"Join keys: {report_row['selected_join_keys']}")
+        print(f"Matched share: {report_row['matched_share']}")
+        print(
+            "General capability fill share: "
+            f"{report_row['general_capability_fill_share_before']} -> "
+            f"{report_row['general_capability_fill_share_after']}"
+        )
+        print(
+            "Green capability fill share: "
+            f"{report_row['green_capability_fill_share_before']} -> "
+            f"{report_row['green_capability_fill_share_after']}"
+        )
+        print(f"Updated state panel path: {paths.state_panel_path(config.start_year, config.end_year)}")
+        print(f"Capability join report path: {paths.capability_join_report_path}")
         return
 
     if args.build_supplier_edges:

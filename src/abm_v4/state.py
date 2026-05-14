@@ -50,6 +50,19 @@ class StateBuildResult:
     output_path: Path | None
 
 
+@dataclass(frozen=True)
+class CapabilityJoinResult:
+    """Inspectable result of Atlas capability enrichment."""
+
+    state_panel: pl.DataFrame
+    source_file: Path
+    selected_join_keys: tuple[tuple[str, str], ...]
+    join_report: pl.DataFrame
+    coverage_by_year: pl.DataFrame
+    coverage_by_sector: pl.DataFrame
+    output_path: Path | None
+
+
 TEXT_COLUMNS = {
     "country_sector",
     "Country",
@@ -59,7 +72,23 @@ TEXT_COLUMNS = {
     "ecosystem_id",
     "ecosystem_label",
     "ecosystem_source",
+    "general_capability_source",
+    "green_capability_source",
 }
+
+GENERAL_CAPABILITY_CANDIDATES = (
+    "capability_export_weighted_pci",
+    "capability_mean_pci",
+    "active_good_count",
+    "diversity",
+)
+
+GREEN_CAPABILITY_CANDIDATES = (
+    "green_capability_export_share",
+    "green_capability_share",
+    "green_active_good_count",
+    "green_product_share",
+)
 
 CANONICAL_COLUMN_CANDIDATES: dict[str, tuple[str, ...]] = {
     "country_sector": ("country_sector", "country_sector_id", "node_id"),
@@ -411,6 +440,353 @@ def build_state_summary_by_year(state_panel: pl.DataFrame) -> pl.DataFrame:
     )
 
 
+def capability_source_candidates(paths: ABMV4Paths) -> tuple[Path, ...]:
+    """Return capability source candidates in explicit priority order."""
+    return (
+        paths.data_atlas / "processed" / "atlas_eora26_sector_capabilities_1995_2016.parquet",
+        paths.data_final / "eora_atlas_dynamic_panel.parquet",
+        paths.data_final / "eora_atlas_merged.parquet",
+    )
+
+
+def load_atlas_capability_panel(paths: ABMV4Paths) -> tuple[Path, pl.DataFrame]:
+    """Load the highest-priority available Atlas capability source."""
+    checked = capability_source_candidates(paths)
+    for source_path in checked:
+        if source_path.exists():
+            return source_path, pl.read_parquet(source_path)
+    checked_text = "; ".join(str(path) for path in checked)
+    raise FileNotFoundError(f"No Atlas capability source found. Checked: {checked_text}")
+
+
+def inspect_capability_columns(
+    state_panel: pl.DataFrame,
+    capability_panel: pl.DataFrame,
+) -> pl.DataFrame:
+    """Build a diagnostic inventory of state and capability key/value columns."""
+    key_candidates = {
+        "country": ("Country", "country", "iso3Code", "Country_detail"),
+        "year": ("Year", "year"),
+        "sector": ("Sector", "sector", "eora26_sector"),
+        "country_sector": ("country_sector",),
+    }
+    capability_candidates = (*GENERAL_CAPABILITY_CANDIDATES, *GREEN_CAPABILITY_CANDIDATES)
+    rows: list[dict[str, object]] = []
+    for group, candidates in key_candidates.items():
+        rows.append(
+            {
+                "column_group": group,
+                "state_columns_available": ", ".join(
+                    column for column in candidates if column in state_panel.columns
+                ),
+                "capability_columns_available": ", ".join(
+                    column for column in candidates if column in capability_panel.columns
+                ),
+            }
+        )
+    rows.append(
+        {
+            "column_group": "capability_variables",
+            "state_columns_available": ", ".join(
+                column for column in capability_candidates if column in state_panel.columns
+            ),
+            "capability_columns_available": ", ".join(
+                column for column in capability_candidates if column in capability_panel.columns
+            ),
+        }
+    )
+    return pl.DataFrame(rows)
+
+
+def select_capability_join_keys(
+    state_panel: pl.DataFrame,
+    capability_panel: pl.DataFrame,
+) -> tuple[tuple[str, str], ...]:
+    """Select explicit state-to-capability join keys from available columns."""
+    country_key = _first_join_key(
+        state_panel.columns,
+        capability_panel.columns,
+        (("Country", "iso3Code"), ("Country", "Country"), ("Country_detail", "iso3Code")),
+    )
+    year_key = _first_join_key(
+        state_panel.columns,
+        capability_panel.columns,
+        (("Year", "year"), ("Year", "Year")),
+    )
+    sector_key = _first_join_key(
+        state_panel.columns,
+        capability_panel.columns,
+        (("Sector", "eora26_sector"), ("Sector", "Sector"), ("Sector", "sector")),
+    )
+    selected = tuple(key for key in (country_key, year_key, sector_key) if key is not None)
+    if len(selected) < 3:
+        raise ValueError(
+            "Could not select a complete capability join key. "
+            f"State columns: {state_panel.columns}; capability columns: {capability_panel.columns}"
+        )
+    return selected
+
+
+def join_capability_variables(
+    state_panel: pl.DataFrame,
+    capability_panel: pl.DataFrame,
+    selected_join_keys: tuple[tuple[str, str], ...],
+) -> pl.DataFrame:
+    """Fill missing canonical capabilities from Atlas variables without overwriting existing values."""
+    state_keys = [state_key for state_key, _ in selected_join_keys]
+    capability_keys = [capability_key for _, capability_key in selected_join_keys]
+    selected_capability_columns = [
+        column
+        for column in (*GENERAL_CAPABILITY_CANDIDATES, *GREEN_CAPABILITY_CANDIDATES)
+        if column in capability_panel.columns
+    ]
+    if not selected_capability_columns:
+        return state_panel.with_columns(
+            pl.lit(False).alias("capability_join_matched"),
+            _source_column("general_capability", "existing_state").alias("general_capability_source"),
+            _source_column("green_capability", "existing_state").alias("green_capability_source"),
+        )
+
+    capability_prepared = (
+        capability_panel.select([*capability_keys, *selected_capability_columns])
+        .unique(subset=capability_keys, keep="first")
+        .rename(
+            {
+                capability_key: state_key
+                for state_key, capability_key in selected_join_keys
+                if capability_key != state_key
+            }
+        )
+    )
+    rename_values = {
+        column: f"atlas_{column}"
+        for column in selected_capability_columns
+        if column in state_panel.columns or column in selected_capability_columns
+    }
+    capability_prepared = capability_prepared.rename(rename_values).with_columns(
+        pl.lit(True).alias("capability_join_matched")
+    )
+    joined = state_panel.join(capability_prepared, on=state_keys, how="left").with_columns(
+        pl.col("capability_join_matched").fill_null(False)
+    )
+
+    general_atlas_columns = [
+        f"atlas_{column}"
+        for column in GENERAL_CAPABILITY_CANDIDATES
+        if f"atlas_{column}" in joined.columns
+    ]
+    green_atlas_columns = [
+        f"atlas_{column}"
+        for column in GREEN_CAPABILITY_CANDIDATES
+        if f"atlas_{column}" in joined.columns
+    ]
+    expressions: list[pl.Expr] = []
+    if general_atlas_columns:
+        expressions.append(pl.coalesce(general_atlas_columns).alias("__atlas_general_capability"))
+    else:
+        expressions.append(pl.lit(None, dtype=pl.Float64).alias("__atlas_general_capability"))
+    if green_atlas_columns:
+        expressions.append(pl.coalesce(green_atlas_columns).alias("__atlas_green_capability"))
+    else:
+        expressions.append(pl.lit(None, dtype=pl.Float64).alias("__atlas_green_capability"))
+
+    joined = joined.with_columns(expressions)
+    if "general_capability_source" not in joined.columns:
+        joined = joined.with_columns(
+            _source_column("general_capability", "existing_state").alias("general_capability_source")
+        )
+    if "green_capability_source" not in joined.columns:
+        joined = joined.with_columns(
+            _source_column("green_capability", "existing_state").alias("green_capability_source")
+        )
+
+    return (
+        joined.with_columns(
+            pl.when(pl.col("general_capability").is_null())
+            .then(pl.col("__atlas_general_capability"))
+            .otherwise(pl.col("general_capability"))
+            .alias("general_capability"),
+            pl.when(pl.col("green_capability").is_null())
+            .then(pl.col("__atlas_green_capability"))
+            .otherwise(pl.col("green_capability"))
+            .alias("green_capability"),
+            pl.when(
+                pl.col("general_capability").is_null()
+                & pl.col("__atlas_general_capability").is_not_null()
+            )
+            .then(pl.lit("atlas_capability_join"))
+            .otherwise(pl.col("general_capability_source"))
+            .alias("general_capability_source"),
+            pl.when(
+                pl.col("green_capability").is_null()
+                & pl.col("__atlas_green_capability").is_not_null()
+            )
+            .then(pl.lit("atlas_capability_join"))
+            .otherwise(pl.col("green_capability_source"))
+            .alias("green_capability_source"),
+        )
+        .drop(["__atlas_general_capability", "__atlas_green_capability"])
+    )
+
+
+def build_capability_join_report(
+    state_before: pl.DataFrame,
+    state_after: pl.DataFrame,
+    source_file: Path,
+    selected_join_keys: tuple[tuple[str, str], ...],
+    column_inspection: pl.DataFrame,
+) -> pl.DataFrame:
+    """Build a one-row capability join diagnostic report."""
+    matched_rows = (
+        int(state_after["capability_join_matched"].sum())
+        if "capability_join_matched" in state_after.columns
+        else 0
+    )
+    before_general = state_before["general_capability"].is_not_null().sum()
+    after_general = state_after["general_capability"].is_not_null().sum()
+    before_green = state_before["green_capability"].is_not_null().sum()
+    after_green = state_after["green_capability"].is_not_null().sum()
+    selected_keys = "; ".join(f"{state}={capability}" for state, capability in selected_join_keys)
+    notes = [
+        "Existing non-missing canonical capability values were preserved.",
+        "Atlas values were used only to fill missing canonical capability values.",
+    ]
+    if after_general <= before_general and after_green <= before_green:
+        notes.append(
+            "Canonical capability coverage did not improve; likely causes include source missingness or already-filled matched rows."
+        )
+    notes.append(
+        "Column inspection: "
+        + " | ".join(
+            f"{row['column_group']}: state[{row['state_columns_available']}], capability[{row['capability_columns_available']}]"
+            for row in column_inspection.to_dicts()
+        )
+    )
+    return pl.DataFrame(
+        {
+            "source_file": [str(source_file)],
+            "selected_join_keys": [selected_keys],
+            "state_rows_before": [state_before.height],
+            "state_rows_after": [state_after.height],
+            "matched_rows": [matched_rows],
+            "unmatched_rows": [state_after.height - matched_rows],
+            "matched_share": [matched_rows / state_after.height if state_after.height else 0.0],
+            "general_capability_nonmissing_before": [before_general],
+            "general_capability_nonmissing_after": [after_general],
+            "green_capability_nonmissing_before": [before_green],
+            "green_capability_nonmissing_after": [after_green],
+            "general_capability_fill_share_before": [
+                1 - before_general / state_before.height if state_before.height else 0.0
+            ],
+            "general_capability_fill_share_after": [
+                1 - after_general / state_after.height if state_after.height else 0.0
+            ],
+            "green_capability_fill_share_before": [
+                1 - before_green / state_before.height if state_before.height else 0.0
+            ],
+            "green_capability_fill_share_after": [
+                1 - after_green / state_after.height if state_after.height else 0.0
+            ],
+            "notes": [" ".join(notes)],
+        }
+    )
+
+
+def build_capability_coverage_by_year(state_panel: pl.DataFrame) -> pl.DataFrame:
+    """Summarize canonical capability coverage by year."""
+    return (
+        state_panel.group_by("Year")
+        .agg(
+            pl.len().alias("rows"),
+            pl.col("general_capability").is_not_null().sum().alias("general_capability_nonmissing"),
+            pl.col("green_capability").is_not_null().sum().alias("green_capability_nonmissing"),
+        )
+        .with_columns(
+            (1 - pl.col("general_capability_nonmissing") / pl.col("rows")).alias(
+                "general_capability_missing_share"
+            ),
+            (1 - pl.col("green_capability_nonmissing") / pl.col("rows")).alias(
+                "green_capability_missing_share"
+            ),
+        )
+        .rename({"Year": "year"})
+        .sort("year")
+    )
+
+
+def build_capability_coverage_by_sector(state_panel: pl.DataFrame) -> pl.DataFrame:
+    """Summarize canonical capability coverage by sector."""
+    return (
+        state_panel.group_by("Sector")
+        .agg(
+            pl.len().alias("rows"),
+            pl.col("general_capability").is_not_null().sum().alias("__general_nonmissing"),
+            pl.col("green_capability").is_not_null().sum().alias("__green_nonmissing"),
+        )
+        .with_columns(
+            (1 - pl.col("__general_nonmissing") / pl.col("rows")).alias(
+                "general_capability_missing_share"
+            ),
+            (1 - pl.col("__green_nonmissing") / pl.col("rows")).alias(
+                "green_capability_missing_share"
+            ),
+        )
+        .drop(["__general_nonmissing", "__green_nonmissing"])
+        .sort("Sector")
+    )
+
+
+def repair_capability_coverage(
+    paths: ABMV4Paths,
+    start_year: int,
+    end_year: int,
+    *,
+    write_outputs: bool = False,
+) -> CapabilityJoinResult:
+    """Repair ABM v4 state capability coverage using explicit Atlas joins."""
+    state_path = paths.state_panel_path(start_year, end_year)
+    if not state_path.exists():
+        raise FileNotFoundError(f"ABM v4 state panel not found: {state_path}")
+    state_panel = pl.read_parquet(state_path)
+    source_file, capability_panel = load_atlas_capability_panel(paths)
+    column_inspection = inspect_capability_columns(state_panel, capability_panel)
+    selected_join_keys = select_capability_join_keys(state_panel, capability_panel)
+    state_after = join_capability_variables(
+        state_panel=state_panel,
+        capability_panel=capability_panel,
+        selected_join_keys=selected_join_keys,
+    )
+    join_report = build_capability_join_report(
+        state_before=state_panel,
+        state_after=state_after,
+        source_file=source_file,
+        selected_join_keys=selected_join_keys,
+        column_inspection=column_inspection,
+    )
+    coverage_by_year = build_capability_coverage_by_year(state_after)
+    coverage_by_sector = build_capability_coverage_by_sector(state_after)
+
+    output_path: Path | None = None
+    if write_outputs:
+        paths.inputs.mkdir(parents=True, exist_ok=True)
+        paths.diagnostics.mkdir(parents=True, exist_ok=True)
+        output_path = state_path
+        state_after.write_parquet(output_path)
+        join_report.write_csv(paths.capability_join_report_path)
+        coverage_by_year.write_csv(paths.capability_coverage_by_year_path)
+        coverage_by_sector.write_csv(paths.capability_coverage_by_sector_path)
+
+    return CapabilityJoinResult(
+        state_panel=state_after,
+        source_file=source_file,
+        selected_join_keys=selected_join_keys,
+        join_report=join_report,
+        coverage_by_year=coverage_by_year,
+        coverage_by_sector=coverage_by_sector,
+        output_path=output_path,
+    )
+
+
 def column_mapping_frame(column_mappings: tuple[ColumnMapping, ...]) -> pl.DataFrame:
     """Convert column mappings to a diagnostics dataframe."""
     return pl.DataFrame(
@@ -487,6 +863,27 @@ def _first_present_column(
         if candidate_column in source_columns:
             return candidate_column
     return None
+
+
+def _first_join_key(
+    state_columns: list[str],
+    capability_columns: list[str],
+    candidates: tuple[tuple[str, str], ...],
+) -> tuple[str, str] | None:
+    state_set = set(state_columns)
+    capability_set = set(capability_columns)
+    for state_column, capability_column in candidates:
+        if state_column in state_set and capability_column in capability_set:
+            return state_column, capability_column
+    return None
+
+
+def _source_column(capability_column: str, source_label: str) -> pl.Expr:
+    return (
+        pl.when(pl.col(capability_column).is_not_null())
+        .then(pl.lit(source_label))
+        .otherwise(pl.lit(None, dtype=pl.Utf8))
+    )
 
 
 def _canonical_expression(canonical_name: str, source_column: str | None) -> pl.Expr:
