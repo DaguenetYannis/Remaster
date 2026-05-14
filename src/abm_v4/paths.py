@@ -97,6 +97,34 @@ class ABMV4Paths:
         return self.diagnostics / "ecosystem_assignment_report.csv"
 
     @property
+    def ecosystem_sector_coverage_path(self) -> Path:
+        return self.diagnostics / "ecosystem_sector_coverage.csv"
+
+    @property
+    def historical_supplier_edges_path(self) -> Path:
+        return self.interim / "historical_supplier_edges.parquet"
+
+    @property
+    def raw_t_supplier_edges_path(self) -> Path:
+        return self.interim / "historical_supplier_edges_raw_T.parquet"
+
+    @property
+    def supplier_edge_report_path(self) -> Path:
+        return self.diagnostics / "supplier_edge_report.csv"
+
+    @property
+    def raw_t_supplier_edge_report_path(self) -> Path:
+        return self.diagnostics / "supplier_edge_raw_T_report.csv"
+
+    @property
+    def supplier_edge_source_comparison_path(self) -> Path:
+        return self.diagnostics / "supplier_edge_source_comparison.csv"
+
+    @property
+    def supplier_edge_schema_report_path(self) -> Path:
+        return self.diagnostics / "supplier_edge_schema_report.csv"
+
+    @property
     def emissions_decomposition_base_path(self) -> Path:
         return self.diagnostics / "emissions_decomposition_base.csv"
 
