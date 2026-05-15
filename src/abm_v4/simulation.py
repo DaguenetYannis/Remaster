@@ -8,7 +8,12 @@ import polars as pl
 
 from src.abm_v4.config import ABMV4Config
 from src.abm_v4.emissions import (
+    EID_DIAGNOSTIC_CANDIDATE_ID,
+    EID_DIAGNOSTIC_D_MIN,
+    EID_DIAGNOSTIC_LAMBDA,
+    HISTORICAL_FRONTIER_GAP_EID_DIAGNOSTIC_MODE,
     HISTORICAL_FRONTIER_GAP_ONLY_MODE,
+    load_eid_diagnostic_scores,
     load_historical_frontier_gap_parameters,
 )
 from src.abm_v4.paths import ABMV4Paths
@@ -130,6 +135,7 @@ class MultiYearBaseSimulator:
             emissions_parameter_file
         )
         self._state_for_frontiers: pl.DataFrame | None = None
+        self._eid_scores: pl.DataFrame | None = None
 
     def load_state_panel(self) -> pl.DataFrame:
         """Load the ABM v4 state panel."""
@@ -243,6 +249,20 @@ class MultiYearBaseSimulator:
                 encoding="utf-8",
             )
             return
+        if self.emissions_transition_mode == HISTORICAL_FRONTIER_GAP_EID_DIAGNOSTIC_MODE:
+            result.state_panel.write_parquet(
+                self.paths.base_multiyear_state_panel_EID_diagnostic_path
+            )
+            result.summary_panel.write_csv(
+                self.paths.base_multiyear_summary_panel_EID_diagnostic_path
+            )
+            result.validation_report.write_csv(
+                self.paths.base_multiyear_EID_diagnostic_validation_report_path
+            )
+            result.yearly_diagnostics.write_csv(
+                self.paths.base_multiyear_EID_diagnostic_yearly_diagnostics_path
+            )
+            return
         result.state_panel.write_parquet(self.paths.base_multiyear_state_panel_path)
         result.summary_panel.write_csv(self.paths.base_multiyear_summary_panel_path)
         result.validation_report.write_csv(self.paths.base_multiyear_validation_report_path)
@@ -262,6 +282,14 @@ class MultiYearBaseSimulator:
             pl.lit(None, dtype=pl.Float64).alias("historical_rho_gap"),
             pl.lit(None, dtype=pl.Float64).alias("historical_tau_gap"),
             pl.lit("").alias("historical_parameter_source"),
+            pl.lit(None, dtype=pl.Utf8).alias("EID_score_name"),
+            pl.lit(None, dtype=pl.Float64).alias("EID_norm"),
+            pl.lit(1.0).alias("D_EID"),
+            pl.lit(False).alias("EID_missing_flag"),
+            pl.lit(False).alias("EID_fallback_flag"),
+            pl.lit(None, dtype=pl.Utf8).alias("EID_candidate_id"),
+            pl.lit(None, dtype=pl.Float64).alias("EID_lambda"),
+            pl.lit(None, dtype=pl.Float64).alias("EID_d_min"),
             pl.lit(False).alias("bad_transition_node_flag"),
             pl.lit(False).alias("production_constraint_flag"),
             pl.lit(0.0).alias("emissions_decomposition_residual_node"),
@@ -395,7 +423,10 @@ class MultiYearBaseSimulator:
         )
 
     def _add_emissions_transition(self, panel: pl.DataFrame) -> pl.DataFrame:
-        if self.emissions_transition_mode == HISTORICAL_FRONTIER_GAP_ONLY_MODE:
+        if self.emissions_transition_mode in {
+            HISTORICAL_FRONTIER_GAP_ONLY_MODE,
+            HISTORICAL_FRONTIER_GAP_EID_DIAGNOSTIC_MODE,
+        }:
             return self._add_historical_frontier_gap_only(panel)
         return self._add_frontier_gap_and_readiness(panel)
 
@@ -416,13 +447,31 @@ class MultiYearBaseSimulator:
         out = self._add_rolling_sector_background(out, int(panel["year"].max()) - 1)
         rho_gap = float(self.historical_gap_parameters["rho_gap"])
         tau_gap = float(self.historical_gap_parameters["tau_gap"])
+        if self.emissions_transition_mode == HISTORICAL_FRONTIER_GAP_EID_DIAGNOSTIC_MODE:
+            out = self._add_eid_diagnostic_scores(out)
+            gap_multiplier = pl.col("D_EID")
+        else:
+            out = out.with_columns(
+                pl.lit(None, dtype=pl.Utf8).alias("EID_score_name"),
+                pl.lit(None, dtype=pl.Float64).alias("EID_norm"),
+                pl.lit(1.0).alias("D_EID"),
+                pl.lit(False).alias("EID_missing_flag"),
+                pl.lit(False).alias("EID_fallback_flag"),
+                pl.lit(None, dtype=pl.Utf8).alias("EID_candidate_id"),
+                pl.lit(None, dtype=pl.Float64).alias("EID_lambda"),
+                pl.lit(None, dtype=pl.Float64).alias("EID_d_min"),
+            )
+            gap_multiplier = pl.lit(1.0)
         out = out.with_columns(
             pl.lit(None, dtype=pl.Float64).alias("readiness"),
             pl.when(pl.col("ei_gap").is_null() | (pl.col("ei_gap") <= 0))
             .then(pl.col("sector_background_trend").fill_null(self.config.emissions.sector_background_fallback))
             .otherwise(
                 pl.col("sector_background_trend").fill_null(self.config.emissions.sector_background_fallback)
-                + pl.lit(rho_gap) * pl.col("ei_gap") / (pl.col("ei_gap") + pl.lit(tau_gap))
+                + gap_multiplier
+                * pl.lit(rho_gap)
+                * pl.col("ei_gap")
+                / (pl.col("ei_gap") + pl.lit(tau_gap))
             )
             .clip(self.config.emissions.rEI_min, self.config.emissions.rEI_max)
             .alias("rEI_used"),
@@ -457,6 +506,32 @@ class MultiYearBaseSimulator:
             .clip(0.0, self.config.capability.gcap_max)
             .alias("gcap_sim"),
         ).drop(["_EI_frontier"])
+
+    def _load_eid_scores(self) -> pl.DataFrame:
+        if self._eid_scores is None:
+            self._eid_scores = load_eid_diagnostic_scores(self.paths)
+        return self._eid_scores
+
+    def _add_eid_diagnostic_scores(self, panel: pl.DataFrame) -> pl.DataFrame:
+        scores = self._load_eid_scores()
+        return panel.join(scores, on="country_sector", how="left").with_columns(
+            pl.lit(EID_DIAGNOSTIC_CANDIDATE_ID).alias("EID_candidate_id"),
+            pl.lit(EID_DIAGNOSTIC_LAMBDA).alias("EID_lambda"),
+            pl.lit(EID_DIAGNOSTIC_D_MIN).alias("EID_d_min"),
+            pl.col("EID_missing_flag").fill_null(True),
+            pl.col("EID_score_name").fill_null("structural_dependence_plus_brown_lockin"),
+        ).with_columns(
+            (pl.col("EID_missing_flag") | pl.col("EID_norm").is_null()).alias("EID_fallback_flag"),
+            pl.when(pl.col("EID_norm").is_null())
+            .then(pl.lit(1.0))
+            .otherwise(
+                (pl.lit(1.0) - pl.lit(EID_DIAGNOSTIC_LAMBDA) * pl.col("EID_norm")).clip(
+                    EID_DIAGNOSTIC_D_MIN,
+                    1.0,
+                )
+            )
+            .alias("D_EID"),
+        )
 
     def _add_frontier_gap_and_readiness(self, panel: pl.DataFrame) -> pl.DataFrame:
         frontier = (

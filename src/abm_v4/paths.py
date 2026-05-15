@@ -75,6 +75,44 @@ class ABMV4Paths:
             self.validation,
         )
 
+    @property
+    def final(self) -> Path:
+        return self.data_abm_v4 / "final"
+
+    @property
+    def final_tables(self) -> Path:
+        return self.final / "tables"
+
+    @property
+    def final_plots(self) -> Path:
+        return self.final / "plots"
+
+    @property
+    def outputs_root(self) -> Path:
+        return self.project_root / "outputs"
+
+    @property
+    def outputs_plots_abm_v4_final(self) -> Path:
+        return self.outputs_root / "plots" / "abm_v4_final"
+
+    def final_artifact_directories(self) -> tuple[Path, ...]:
+        """Return final ABM v4 artifact directories without creating them."""
+        return (
+            self.final,
+            self.final_tables,
+            self.final_plots,
+            self.outputs_plots_abm_v4_final,
+        )
+
+    def ensure_final_artifact_directories(self) -> None:
+        """Create only final ABM v4 artifact directories."""
+        for output_directory in self.final_artifact_directories():
+            output_directory.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def final_artifact_index_path(self) -> Path:
+        return self.final / "abm_v4_final_artifact_index.csv"
+
     def ensure_output_directories(self) -> None:
         """Create only ABM v4 output directories."""
         for output_directory in self.output_directories():
@@ -397,12 +435,20 @@ class ABMV4Paths:
         return self.simulations / "base_multiyear_state_panel_historical_frontier_gap.parquet"
 
     @property
+    def base_multiyear_state_panel_EID_diagnostic_path(self) -> Path:
+        return self.simulations / "base_multiyear_state_panel_EID_diagnostic.parquet"
+
+    @property
     def base_multiyear_summary_panel_path(self) -> Path:
         return self.simulations / "base_multiyear_summary_panel.csv"
 
     @property
     def base_multiyear_summary_panel_historical_frontier_gap_path(self) -> Path:
         return self.simulations / "base_multiyear_summary_panel_historical_frontier_gap.csv"
+
+    @property
+    def base_multiyear_summary_panel_EID_diagnostic_path(self) -> Path:
+        return self.simulations / "base_multiyear_summary_panel_EID_diagnostic.csv"
 
     @property
     def base_multiyear_validation_report_path(self) -> Path:
@@ -417,12 +463,220 @@ class ABMV4Paths:
         return self.validation / "base_multiyear_validation_report_historical_frontier_gap.md"
 
     @property
+    def base_multiyear_EID_diagnostic_validation_report_path(self) -> Path:
+        return self.diagnostics / "base_multiyear_EID_diagnostic_validation_report.csv"
+
+    @property
     def base_multiyear_yearly_diagnostics_path(self) -> Path:
         return self.diagnostics / "base_multiyear_yearly_diagnostics.csv"
 
     @property
     def base_multiyear_yearly_diagnostics_historical_frontier_gap_path(self) -> Path:
         return self.diagnostics / "base_multiyear_yearly_diagnostics_historical_frontier_gap.csv"
+
+    @property
+    def base_multiyear_EID_diagnostic_yearly_diagnostics_path(self) -> Path:
+        return self.diagnostics / "base_multiyear_EID_diagnostic_yearly_diagnostics.csv"
+
+    @property
+    def multiyear_EID_diagnostic_error_panel_path(self) -> Path:
+        return self.validation / "multiyear_EID_diagnostic_error_panel.parquet"
+
+    @property
+    def multiyear_EID_diagnostic_error_summary_path(self) -> Path:
+        return self.validation / "multiyear_EID_diagnostic_error_summary.csv"
+
+    @property
+    def multiyear_EID_diagnostic_by_sector_path(self) -> Path:
+        return self.validation / "multiyear_EID_diagnostic_by_sector.csv"
+
+    @property
+    def multiyear_EID_diagnostic_by_country_path(self) -> Path:
+        return self.validation / "multiyear_EID_diagnostic_by_country.csv"
+
+    @property
+    def multiyear_EID_diagnostic_by_electricity_path(self) -> Path:
+        return self.validation / "multiyear_EID_diagnostic_by_electricity.csv"
+
+    @property
+    def multiyear_EID_diagnostic_china_electricity_path(self) -> Path:
+        return self.validation / "multiyear_EID_diagnostic_china_electricity.csv"
+
+    @property
+    def multiyear_EID_diagnostic_by_EID_decile_path(self) -> Path:
+        return self.validation / "multiyear_EID_diagnostic_by_EID_decile.csv"
+
+    @property
+    def multiyear_EID_diagnostic_by_subtype_path(self) -> Path:
+        return self.validation / "multiyear_EID_diagnostic_by_subtype.csv"
+
+    @property
+    def multiyear_EID_diagnostic_pseudo_agent_sensitivity_path(self) -> Path:
+        return self.validation / "multiyear_EID_diagnostic_pseudo_agent_sensitivity.csv"
+
+    @property
+    def multiyear_EID_diagnostic_comparison_path(self) -> Path:
+        return self.validation / "multiyear_EID_diagnostic_comparison.csv"
+
+    @property
+    def multiyear_EID_diagnostic_recommendation_path(self) -> Path:
+        return self.validation / "multiyear_EID_diagnostic_recommendation.csv"
+
+    @property
+    def multiyear_EID_diagnostic_report_path(self) -> Path:
+        return self.validation / "multiyear_EID_diagnostic_report.md"
+
+    @property
+    def multiyear_EID_diagnostic_mechanism_audit_path(self) -> Path:
+        return self.validation / "multiyear_EID_diagnostic_mechanism_audit.csv"
+
+    @property
+    def multiyear_EID_diagnostic_abm_v5_implications_path(self) -> Path:
+        return self.validation / "multiyear_EID_diagnostic_abm_v5_implications.csv"
+
+    @property
+    def adaptive_EID_parameter_grid_path(self) -> Path:
+        return self.validation / "adaptive_EID_parameter_grid.csv"
+
+    @property
+    def adaptive_EID_calibration_windows_path(self) -> Path:
+        return self.validation / "adaptive_EID_calibration_windows.csv"
+
+    @property
+    def adaptive_EID_calibration_results_path(self) -> Path:
+        return self.validation / "adaptive_EID_calibration_results.csv"
+
+    @property
+    def adaptive_EID_validation_panel_path(self) -> Path:
+        return self.validation / "adaptive_EID_validation_panel.parquet"
+
+    @property
+    def adaptive_EID_model_comparison_path(self) -> Path:
+        return self.validation / "adaptive_EID_model_comparison.csv"
+
+    @property
+    def adaptive_EID_parameter_stability_path(self) -> Path:
+        return self.validation / "adaptive_EID_parameter_stability.csv"
+
+    @property
+    def adaptive_EID_by_subtype_path(self) -> Path:
+        return self.validation / "adaptive_EID_by_subtype.csv"
+
+    @property
+    def adaptive_EID_pseudo_agent_sensitivity_path(self) -> Path:
+        return self.validation / "adaptive_EID_pseudo_agent_sensitivity.csv"
+
+    @property
+    def adaptive_EID_hypothesis_tests_path(self) -> Path:
+        return self.validation / "adaptive_EID_hypothesis_tests.csv"
+
+    @property
+    def adaptive_EID_recommendation_path(self) -> Path:
+        return self.validation / "adaptive_EID_recommendation.csv"
+
+    @property
+    def adaptive_EID_report_path(self) -> Path:
+        return self.validation / "adaptive_EID_report.md"
+
+    @property
+    def q_energy_source_inventory_path(self) -> Path:
+        return self.validation / "q_energy_source_inventory.csv"
+
+    @property
+    def q_energy_row_mapping_path(self) -> Path:
+        return self.validation / "q_energy_row_mapping.csv"
+
+    @property
+    def q_energy_mix_panel_path(self) -> Path:
+        return self.validation / "q_energy_mix_panel.parquet"
+
+    @property
+    def q_energy_mix_quality_audit_path(self) -> Path:
+        return self.validation / "q_energy_mix_quality_audit.csv"
+
+    @property
+    def q_energy_mix_quality_by_year_path(self) -> Path:
+        return self.validation / "q_energy_mix_quality_by_year.csv"
+
+    @property
+    def q_energy_mix_quality_by_sector_path(self) -> Path:
+        return self.validation / "q_energy_mix_quality_by_sector.csv"
+
+    @property
+    def q_energy_mix_quality_by_country_path(self) -> Path:
+        return self.validation / "q_energy_mix_quality_by_country.csv"
+
+    @property
+    def q_energy_mix_aggregate_plausibility_path(self) -> Path:
+        return self.validation / "q_energy_mix_aggregate_plausibility.csv"
+
+    @property
+    def q_energy_mix_china_electricity_audit_path(self) -> Path:
+        return self.validation / "q_energy_mix_china_electricity_audit.csv"
+
+    @property
+    def q_energy_mix_transition_error_panel_path(self) -> Path:
+        return self.validation / "q_energy_mix_transition_error_panel.parquet"
+
+    @property
+    def q_energy_mix_predictor_screening_path(self) -> Path:
+        return self.validation / "q_energy_mix_predictor_screening.csv"
+
+    @property
+    def q_energy_mix_by_subtype_path(self) -> Path:
+        return self.validation / "q_energy_mix_by_subtype.csv"
+
+    @property
+    def q_energy_mix_hypothesis_tests_path(self) -> Path:
+        return self.validation / "q_energy_mix_hypothesis_tests.csv"
+
+    @property
+    def q_energy_mix_recommendation_path(self) -> Path:
+        return self.validation / "q_energy_mix_recommendation.csv"
+
+    @property
+    def q_energy_mix_report_path(self) -> Path:
+        return self.validation / "q_energy_mix_report.md"
+
+    @property
+    def final_abm_v4_input_availability_path(self) -> Path:
+        return self.validation / "final_abm_v4_input_availability.csv"
+
+    @property
+    def final_surviving_rule_comparison_path(self) -> Path:
+        return self.validation / "final_surviving_rule_comparison.csv"
+
+    @property
+    def final_validation_objective_matrix_path(self) -> Path:
+        return self.validation / "final_validation_objective_matrix.csv"
+
+    @property
+    def final_rejected_mechanism_register_path(self) -> Path:
+        return self.validation / "final_rejected_mechanism_register.csv"
+
+    @property
+    def final_model_boundary_statement_path(self) -> Path:
+        return self.validation / "final_model_boundary_statement.md"
+
+    @property
+    def final_scenario_readiness_assessment_path(self) -> Path:
+        return self.validation / "final_scenario_readiness_assessment.csv"
+
+    @property
+    def final_abm_v5_research_agenda_path(self) -> Path:
+        return self.validation / "final_abm_v5_research_agenda.csv"
+
+    @property
+    def final_abm_v4_hypothesis_status_path(self) -> Path:
+        return self.validation / "final_abm_v4_hypothesis_status.csv"
+
+    @property
+    def final_abm_v4_consolidation_report_path(self) -> Path:
+        return self.validation / "final_abm_v4_consolidation_report.md"
+
+    @property
+    def final_abm_v4_portfolio_summary_path(self) -> Path:
+        return self.validation / "final_abm_v4_portfolio_summary.md"
 
     @property
     def multiyear_base_model_comparison_csv_path(self) -> Path:
@@ -531,6 +785,242 @@ class ABMV4Paths:
     @property
     def electricity_data_audit_report_path(self) -> Path:
         return self.validation / "electricity_data_audit_report.md"
+
+    @property
+    def raw_eora_electricity_source_inventory_path(self) -> Path:
+        return self.validation / "raw_eora_electricity_source_inventory.csv"
+
+    @property
+    def raw_eora_china_electricity_series_by_source_path(self) -> Path:
+        return self.validation / "raw_eora_china_electricity_series_by_source.csv"
+
+    @property
+    def raw_eora_china_electricity_cross_source_comparison_path(self) -> Path:
+        return self.validation / "raw_eora_china_electricity_cross_source_comparison.csv"
+
+    @property
+    def raw_eora_electricity_scaling_audit_path(self) -> Path:
+        return self.validation / "raw_eora_electricity_scaling_audit.csv"
+
+    @property
+    def raw_eora_electricity_mapping_audit_path(self) -> Path:
+        return self.validation / "raw_eora_electricity_mapping_audit.csv"
+
+    @property
+    def raw_eora_electricity_breakpoint_audit_path(self) -> Path:
+        return self.validation / "raw_eora_electricity_breakpoint_audit.csv"
+
+    @property
+    def raw_eora_major_electricity_comparison_path(self) -> Path:
+        return self.validation / "raw_eora_major_electricity_comparison.csv"
+
+    @property
+    def raw_eora_electricity_data_audit_recommendation_path(self) -> Path:
+        return self.validation / "raw_eora_electricity_data_audit_recommendation.csv"
+
+    @property
+    def raw_eora_electricity_data_audit_report_path(self) -> Path:
+        return self.validation / "raw_eora_electricity_data_audit_report.md"
+
+    @property
+    def electricity_transition_target_diagnostics_path(self) -> Path:
+        return self.validation / "electricity_transition_target_diagnostics.csv"
+
+    @property
+    def electricity_transition_rule_comparison_path(self) -> Path:
+        return self.validation / "electricity_transition_rule_comparison.csv"
+
+    @property
+    def electricity_transition_rule_by_country_path(self) -> Path:
+        return self.validation / "electricity_transition_rule_by_country.csv"
+
+    @property
+    def electricity_transition_rule_by_year_path(self) -> Path:
+        return self.validation / "electricity_transition_rule_by_year.csv"
+
+    @property
+    def electricity_transition_rule_by_decile_path(self) -> Path:
+        return self.validation / "electricity_transition_rule_by_decile.csv"
+
+    @property
+    def electricity_transition_rule_by_jump_status_path(self) -> Path:
+        return self.validation / "electricity_transition_rule_by_jump_status.csv"
+
+    @property
+    def china_electricity_rule_comparison_path(self) -> Path:
+        return self.validation / "china_electricity_rule_comparison.csv"
+
+    @property
+    def electricity_transition_regime_recommendation_path(self) -> Path:
+        return self.validation / "electricity_transition_regime_recommendation.csv"
+
+    @property
+    def electricity_transition_regime_report_path(self) -> Path:
+        return self.validation / "electricity_transition_regime_report.md"
+
+    @property
+    def structural_signature_metric_inventory_path(self) -> Path:
+        return self.validation / "structural_signature_metric_inventory.csv"
+
+    @property
+    def structural_signature_node_year_panel_path(self) -> Path:
+        return self.validation / "structural_signature_node_year_panel.parquet"
+
+    @property
+    def structural_signature_node_panel_path(self) -> Path:
+        return self.validation / "structural_signature_node_panel.parquet"
+
+    @property
+    def structural_signature_label_summary_path(self) -> Path:
+        return self.validation / "structural_signature_label_summary.csv"
+
+    @property
+    def electricity_structural_signature_contrast_path(self) -> Path:
+        return self.validation / "electricity_structural_signature_contrast.csv"
+
+    @property
+    def structural_signature_metric_screening_path(self) -> Path:
+        return self.validation / "structural_signature_metric_screening.csv"
+
+    @property
+    def structural_signature_non_electricity_lookalikes_path(self) -> Path:
+        return self.validation / "structural_signature_non_electricity_lookalikes.csv"
+
+    @property
+    def candidate_transition_inertia_proxies_path(self) -> Path:
+        return self.validation / "candidate_transition_inertia_proxies.csv"
+
+    @property
+    def structural_signature_recommendation_path(self) -> Path:
+        return self.validation / "structural_signature_recommendation.csv"
+
+    @property
+    def structural_signature_report_path(self) -> Path:
+        return self.validation / "structural_signature_report.md"
+
+    @property
+    def essential_input_supplier_buyer_panel_path(self) -> Path:
+        return self.validation / "essential_input_supplier_buyer_panel.parquet"
+
+    @property
+    def essential_input_node_metrics_path(self) -> Path:
+        return self.validation / "essential_input_node_metrics.csv"
+
+    @property
+    def electricity_dependence_signature_contrast_path(self) -> Path:
+        return self.validation / "electricity_dependence_signature_contrast.csv"
+
+    @property
+    def dependence_vs_symptom_metric_comparison_path(self) -> Path:
+        return self.validation / "dependence_vs_symptom_metric_comparison.csv"
+
+    @property
+    def dependence_metric_screening_path(self) -> Path:
+        return self.validation / "dependence_metric_screening.csv"
+
+    @property
+    def essential_input_non_electricity_lookalikes_path(self) -> Path:
+        return self.validation / "essential_input_non_electricity_lookalikes.csv"
+
+    @property
+    def candidate_structural_dependence_proxies_path(self) -> Path:
+        return self.validation / "candidate_structural_dependence_proxies.csv"
+
+    @property
+    def essential_input_dependence_recommendation_path(self) -> Path:
+        return self.validation / "essential_input_dependence_recommendation.csv"
+
+    @property
+    def essential_input_dependence_report_path(self) -> Path:
+        return self.validation / "essential_input_dependence_report.md"
+
+    @property
+    def essential_input_dampener_candidate_grid_path(self) -> Path:
+        return self.validation / "essential_input_dampener_candidate_grid.csv"
+
+    @property
+    def essential_input_dampener_scores_path(self) -> Path:
+        return self.validation / "essential_input_dampener_scores.csv"
+
+    @property
+    def essential_input_historical_residual_panel_path(self) -> Path:
+        return self.validation / "essential_input_historical_residual_panel.parquet"
+
+    @property
+    def essential_input_historical_residual_summary_path(self) -> Path:
+        return self.validation / "essential_input_historical_residual_summary.csv"
+
+    @property
+    def essential_input_dampener_validation_results_path(self) -> Path:
+        return self.validation / "essential_input_dampener_validation_results.csv"
+
+    @property
+    def essential_input_dampener_by_sector_path(self) -> Path:
+        return self.validation / "essential_input_dampener_by_sector.csv"
+
+    @property
+    def essential_input_dampener_by_country_path(self) -> Path:
+        return self.validation / "essential_input_dampener_by_country.csv"
+
+    @property
+    def essential_input_dampener_by_electricity_path(self) -> Path:
+        return self.validation / "essential_input_dampener_by_electricity.csv"
+
+    @property
+    def essential_input_dampener_china_electricity_path(self) -> Path:
+        return self.validation / "essential_input_dampener_china_electricity.csv"
+
+    @property
+    def essential_input_dampener_by_EID_decile_path(self) -> Path:
+        return self.validation / "essential_input_dampener_by_EID_decile.csv"
+
+    @property
+    def essential_input_dampener_mechanism_decomposition_path(self) -> Path:
+        return self.validation / "essential_input_dampener_mechanism_decomposition.csv"
+
+    @property
+    def essential_input_dampener_abm_v5_implications_path(self) -> Path:
+        return self.validation / "essential_input_dampener_abm_v5_implications.csv"
+
+    @property
+    def essential_input_dampener_recommendation_path(self) -> Path:
+        return self.validation / "essential_input_dampener_recommendation.csv"
+
+    @property
+    def essential_input_dampener_report_path(self) -> Path:
+        return self.validation / "essential_input_dampener_report.md"
+
+    @property
+    def eid_high_node_heterogeneity_panel_path(self) -> Path:
+        return self.validation / "eid_high_node_heterogeneity_panel.csv"
+
+    @property
+    def eid_subtype_composition_path(self) -> Path:
+        return self.validation / "eid_subtype_composition.csv"
+
+    @property
+    def eid_dampener_performance_by_subtype_path(self) -> Path:
+        return self.validation / "eid_dampener_performance_by_subtype.csv"
+
+    @property
+    def eid_dampener_failure_modes_path(self) -> Path:
+        return self.validation / "eid_dampener_failure_modes.csv"
+
+    @property
+    def eid_pseudo_agent_audit_path(self) -> Path:
+        return self.validation / "eid_pseudo_agent_audit.csv"
+
+    @property
+    def eid_abm_v5_agent_type_candidates_path(self) -> Path:
+        return self.validation / "eid_abm_v5_agent_type_candidates.csv"
+
+    @property
+    def eid_failure_mode_recommendation_path(self) -> Path:
+        return self.validation / "eid_failure_mode_recommendation.csv"
+
+    @property
+    def eid_failure_mode_report_path(self) -> Path:
+        return self.validation / "eid_failure_mode_report.md"
 
     @property
     def supplier_edge_schema_report_path(self) -> Path:

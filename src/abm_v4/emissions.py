@@ -14,13 +14,19 @@ from src.abm_v4.paths import ABMV4Paths
 
 
 HISTORICAL_FRONTIER_GAP_ONLY_MODE = "historical_frontier_gap_only"
+HISTORICAL_FRONTIER_GAP_EID_DIAGNOSTIC_MODE = "historical_frontier_gap_EID_diagnostic"
 ALLOWED_EMISSIONS_TRANSITION_MODES = {
     "frontier_gap_readiness",
     "legacy_raw_log",
     HISTORICAL_FRONTIER_GAP_ONLY_MODE,
+    HISTORICAL_FRONTIER_GAP_EID_DIAGNOSTIC_MODE,
 }
 HISTORICAL_FRONTIER_GAP_DEFAULT_RHO = 0.03
 HISTORICAL_FRONTIER_GAP_DEFAULT_TAU = 1.0
+EID_DIAGNOSTIC_CANDIDATE_ID = "c0061"
+EID_DIAGNOSTIC_SCORE_NAME = "structural_dependence_plus_brown_lockin"
+EID_DIAGNOSTIC_LAMBDA = 1.0
+EID_DIAGNOSTIC_D_MIN = 0.25
 
 
 @dataclass(frozen=True)
@@ -158,6 +164,61 @@ def load_historical_frontier_gap_parameters(
                 "fallback_used": False,
             }
     return fallback
+
+
+def load_eid_diagnostic_scores(paths: ABMV4Paths) -> pl.DataFrame:
+    """Load Phase 23 c0061 normalized EID scores for diagnostic dampening."""
+    if paths.essential_input_dampener_scores_path.exists():
+        scores = pl.read_csv(paths.essential_input_dampener_scores_path)
+        required = {"country_sector", "EID_score_name", "EID_norm"}
+        missing = required - set(scores.columns)
+        if missing:
+            raise ValueError(f"Phase 23 EID score table is missing columns: {sorted(missing)}")
+        selected = scores.filter(pl.col("EID_score_name") == EID_DIAGNOSTIC_SCORE_NAME)
+        if not selected.is_empty():
+            return selected.select(
+                "country_sector",
+                pl.lit(EID_DIAGNOSTIC_SCORE_NAME).alias("EID_score_name"),
+                pl.col("EID_norm").cast(pl.Float64, strict=False).alias("EID_norm"),
+                pl.col("EID_norm").is_null().alias("EID_missing_flag"),
+                pl.lit(False).alias("EID_reconstructed_flag"),
+            )
+    if not paths.essential_input_node_metrics_path.exists():
+        raise FileNotFoundError(
+            "Missing EID scores and Phase 22 node metrics. Run "
+            "--diagnose-essential-input-dependence and --test-essential-input-dampener first."
+        )
+    metrics = pl.read_csv(paths.essential_input_node_metrics_path)
+    required = {"country_sector", "structural_dependence_score_diagnostic", "mean_brown_centrality"}
+    missing = required - set(metrics.columns)
+    if missing:
+        raise ValueError(
+            "Cannot reconstruct structural_dependence_plus_brown_lockin; "
+            f"missing Phase 22 columns: {sorted(missing)}"
+        )
+    raw = metrics.select(
+        "country_sector",
+        (
+            (
+                pl.col("structural_dependence_score_diagnostic").fill_null(0)
+                + pl.col("mean_brown_centrality").fill_null(0)
+            )
+            / 2
+        ).alias("_raw"),
+    )
+    values = raw["_raw"].drop_nulls()
+    if values.is_empty():
+        raise ValueError("Reconstructed EID score is empty.")
+    p05 = float(values.quantile(0.05))
+    p95 = float(values.quantile(0.95))
+    if p95 == p05:
+        raise ValueError("Cannot normalize reconstructed EID score because p05 equals p95.")
+    return raw.with_columns(
+        pl.lit(EID_DIAGNOSTIC_SCORE_NAME).alias("EID_score_name"),
+        ((pl.col("_raw") - p05) / (p95 - p05)).clip(0, 1).alias("EID_norm"),
+        pl.col("_raw").is_null().alias("EID_missing_flag"),
+        pl.lit(True).alias("EID_reconstructed_flag"),
+    ).select("country_sector", "EID_score_name", "EID_norm", "EID_missing_flag", "EID_reconstructed_flag")
 
 
 class EmissionsTransitionEngine:
@@ -693,7 +754,7 @@ class EmissionsTransitionEngine:
         latest_state = self.prepare_latest_valid_state(state_panel=state_panel, year=year)
         selected_year = int(latest_state["year"].max())
         historical_rEI = self.compute_historical_rEI(state_panel)
-        if mode == HISTORICAL_FRONTIER_GAP_ONLY_MODE:
+        if mode in {HISTORICAL_FRONTIER_GAP_ONLY_MODE, HISTORICAL_FRONTIER_GAP_EID_DIAGNOSTIC_MODE}:
             rolling_frontier = self.compute_rolling_sector_frontiers(
                 state_panel,
                 selected_year,
@@ -765,12 +826,54 @@ class EmissionsTransitionEngine:
             rho_gap=float(parameter_info["rho_gap"]),
             tau_gap=float(parameter_info["tau_gap"]),
         )
+        if mode == HISTORICAL_FRONTIER_GAP_EID_DIAGNOSTIC_MODE:
+            eid_scores = load_eid_diagnostic_scores(self.paths)
+            panel = panel.join(eid_scores, on="country_sector", how="left").with_columns(
+                pl.lit(EID_DIAGNOSTIC_CANDIDATE_ID).alias("EID_candidate_id"),
+                pl.lit(EID_DIAGNOSTIC_LAMBDA).alias("EID_lambda"),
+                pl.lit(EID_DIAGNOSTIC_D_MIN).alias("EID_d_min"),
+                pl.col("EID_missing_flag").fill_null(True),
+                pl.col("EID_score_name").fill_null(EID_DIAGNOSTIC_SCORE_NAME),
+            ).with_columns(
+                (pl.col("EID_missing_flag") | pl.col("EID_norm").is_null()).alias("EID_fallback_flag"),
+                pl.when(pl.col("EID_norm").is_null())
+                .then(pl.lit(1.0))
+                .otherwise(
+                    (pl.lit(1.0) - EID_DIAGNOSTIC_LAMBDA * pl.col("EID_norm")).clip(
+                        EID_DIAGNOSTIC_D_MIN,
+                        1.0,
+                    )
+                )
+                .alias("D_EID"),
+            ).with_columns(
+                (
+                    pl.col("sector_background_trend").fill_null(self.config.sector_background_fallback)
+                    + pl.col("D_EID")
+                    * pl.lit(float(parameter_info["rho_gap"]))
+                    * pl.col("ei_gap").fill_null(0.0)
+                    / (pl.col("ei_gap").fill_null(0.0) + pl.lit(float(parameter_info["tau_gap"])))
+                ).alias("rEI_historical_frontier_gap_EID_diagnostic")
+            )
+        else:
+            panel = panel.with_columns(
+                pl.lit(None, dtype=pl.Utf8).alias("EID_score_name"),
+                pl.lit(None, dtype=pl.Float64).alias("EID_norm"),
+                pl.lit(1.0).alias("D_EID"),
+                pl.lit(False).alias("EID_missing_flag"),
+                pl.lit(False).alias("EID_fallback_flag"),
+                pl.lit(None, dtype=pl.Utf8).alias("EID_candidate_id"),
+                pl.lit(None, dtype=pl.Float64).alias("EID_lambda"),
+                pl.lit(None, dtype=pl.Float64).alias("EID_d_min"),
+                pl.lit(None, dtype=pl.Float64).alias("rEI_historical_frontier_gap_EID_diagnostic"),
+            )
         panel = self.compute_legacy_raw_log_rEI(panel)
         panel = panel.with_columns(
             pl.when(pl.lit(mode) == "legacy_raw_log")
             .then(pl.col("rEI_legacy_raw_log"))
             .when(pl.lit(mode) == HISTORICAL_FRONTIER_GAP_ONLY_MODE)
             .then(pl.col("rEI_historical_frontier_gap_only"))
+            .when(pl.lit(mode) == HISTORICAL_FRONTIER_GAP_EID_DIAGNOSTIC_MODE)
+            .then(pl.col("rEI_historical_frontier_gap_EID_diagnostic"))
             .otherwise(pl.col("rEI_frontier_gap"))
             .alias("rEI_raw")
         ).with_columns(
@@ -821,6 +924,15 @@ class EmissionsTransitionEngine:
             "decomposition_residual_node",
             "rEI_legacy_raw_log",
             "rEI_historical_frontier_gap_only",
+            "rEI_historical_frontier_gap_EID_diagnostic",
+            "EID_score_name",
+            "EID_norm",
+            "D_EID",
+            "EID_missing_flag",
+            "EID_fallback_flag",
+            "EID_candidate_id",
+            "EID_lambda",
+            "EID_d_min",
             "historical_rho_gap",
             "historical_tau_gap",
             "historical_parameter_source",

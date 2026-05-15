@@ -1597,6 +1597,584 @@ Phase 18 recommendation:
 - If the raw data path is clean, then treat electricity as a sector-specific transition case and only then test a weak dampened frontier-gap rule as a diagnostic candidate.
 - Scenarios remain premature.
 
+## Phase 19 Raw Eora Electricity Data Path Audit
+
+Phase 19 traces the China Electricity, Gas and Water anomaly through existing Eora-derived files. It does not run scenarios, recalibrate, implement a hybrid rule, change production dynamics, overwrite `config.py`, rebuild raw-T edges, or modify protected v1/v2/v3 sources.
+
+Implemented audit:
+
+- `RawEoraElectricityDataAudit` in `src/abm_v4/validation.py`.
+- CLI flag: `--audit-raw-eora-electricity-data`.
+- Output paths are defined under `ABMV4Paths` and are written only when `--create-output-dirs` is provided.
+- The audit inspects candidate schemas defensively and reports missing or unusable sources rather than assuming column names.
+
+Outputs written:
+
+- `data/abm_v4/validation/raw_eora_electricity_source_inventory.csv`
+- `data/abm_v4/validation/raw_eora_china_electricity_series_by_source.csv`
+- `data/abm_v4/validation/raw_eora_china_electricity_cross_source_comparison.csv`
+- `data/abm_v4/validation/raw_eora_electricity_scaling_audit.csv`
+- `data/abm_v4/validation/raw_eora_electricity_mapping_audit.csv`
+- `data/abm_v4/validation/raw_eora_electricity_breakpoint_audit.csv`
+- `data/abm_v4/validation/raw_eora_major_electricity_comparison.csv`
+- `data/abm_v4/validation/raw_eora_electricity_data_audit_recommendation.csv`
+- `data/abm_v4/validation/raw_eora_electricity_data_audit_report.md`
+
+Sources inspected:
+
+- The audit inspects ABM v4 input/interim/simulation files, ABM v3 input panels, and final Eora-Atlas panels.
+- It avoids generated validation/diagnostic outputs and skips very large raw-T edge files.
+- Fifteen usable China electricity sources were identified, including ABM v3 historical panels, the ABM v4 state panel, ABM v4 multi-year state panels, and final Eora-Atlas panels.
+
+China electricity lineage:
+
+- China Electricity, Gas and Water is consistently extracted from the ABM v4 state panel and upstream ABM v3/final panels.
+- Mapping audit result: all extracted source-year records are `consistent`; no duplicate-record mapping issue remains in the full-window lineage sources.
+- The audit finds no evidence that the Phase 18 anomaly is caused by a simple country/sector mapping failure.
+
+Output, emissions, and EI consistency:
+
+- Cross-source comparison statuses include 1,929 exact or near matches, 913 mismatches, 25 possible scale-difference comparisons, and missing-variable comparisons where a source lacks output or emissions candidates.
+- The mismatch share used for the recommendation is about 0.133 after excluding missing-variable comparisons.
+- No stable scale factor was detected in the scaling audit (`scale_flags=0`).
+- The evidence does not point to a clean unit conversion problem such as 1,000 or 1,000,000.
+
+Breakpoint and jump findings:
+
+- China electricity has 14 jump flags in the preferred ABM v4 state lineage.
+- China jump years include 1998, 2002, 2003, 2005, and 2007.
+- The largest China electricity EI/rEI jumps are tied to sharp EI declines in 1998, 2005, and 2007.
+- Those EI declines coincide with large output jumps in 1998, 2005, and 2007.
+- Emissions jumps are flagged in 2002 and 2003.
+- This means the severe EI behavior comes from both output and emissions dynamics, with output surges especially important in the large negative rEI years.
+
+Comparison with other major electricity nodes:
+
+- China is not the only major electricity node with jump behavior.
+- Jump counts among major electricity nodes include Russia, Korea, China, Australia, Saudi Arabia, Japan, South Africa, USA, Taiwan, and India.
+- China is especially aggregate-important: it is the second-largest electricity emitter early in the sample and becomes the largest electricity emitter in the preferred comparison source from 2003 onward.
+- China output rank rises from fourth in the mid-1990s to first from 2008 onward.
+
+Final diagnosis:
+
+- The China electricity anomaly does not look like a simple invalid EI, missing EI, mapping, duplicate-record, or stable scale-factor problem.
+- The raw Eora-derived path appears broadly consistent enough that immediate repair is not the main recommendation.
+- The observed behavior is better interpreted as an electricity-sector structural-break and accounting/transition-dynamics issue that generic emissions-transition rules do not represent well.
+- This supports treating electricity as a sector-specific transition case before testing any dampened hybrid rule.
+
+Phase 19 recommendation:
+
+- Recommendation: `treat_electricity_as_sector_specific_transition_case`.
+- Evidence: `mismatch_share=0.133`, `scale_flags=0`, `mapping_problems=0`, `china_jumps=14`, and `other_jump_nodes=9`.
+- Recommended Phase 20: build electricity-specific transition diagnostics that separate output-growth, emissions-growth, and EI-change regimes for major electricity nodes before testing a dampened frontier-gap hybrid.
+- Keep `frontier_gap_readiness` as the temporary aggregate-safe base and keep `historical_frontier_gap_only` as a transition-mechanism candidate.
+- Scenarios remain premature.
+
+## Phase 20 Electricity-Specific Transition Regime Diagnostics
+
+Phase 20 compares electricity-specific historical transition-rule candidates without making any rule active by default. It does not run scenarios, recalibrate globally, implement a final electricity rule, change production dynamics, overwrite `config.py`, rebuild raw-T edges, or rerun the Phase 19 raw audit.
+
+Implemented diagnostics:
+
+- `ElectricityTransitionRegimeDiagnostics` in `src/abm_v4/validation.py`.
+- CLI flag: `--diagnose-electricity-transition-regime`.
+- The diagnostic requires existing Phase 19 outputs and fails clearly if they are absent.
+- Candidate rules are evaluated as diagnostic predictions only.
+
+Outputs written:
+
+- `data/abm_v4/validation/electricity_transition_target_diagnostics.csv`
+- `data/abm_v4/validation/electricity_transition_rule_comparison.csv`
+- `data/abm_v4/validation/electricity_transition_rule_by_country.csv`
+- `data/abm_v4/validation/electricity_transition_rule_by_year.csv`
+- `data/abm_v4/validation/electricity_transition_rule_by_decile.csv`
+- `data/abm_v4/validation/electricity_transition_rule_by_jump_status.csv`
+- `data/abm_v4/validation/china_electricity_rule_comparison.csv`
+- `data/abm_v4/validation/electricity_transition_regime_recommendation.csv`
+- `data/abm_v4/validation/electricity_transition_regime_report.md`
+
+Why electricity is treated as sector-specific:
+
+- Phase 19 found no mapping, duplicate-record, missing-EI, non-positive-EI, or stable-scale-factor explanation for the China electricity anomaly.
+- Phase 20 therefore treats electricity as an energy-system transition regime: output growth, fossil generation lock-in, capacity expansion, and structural breaks can dominate generic country-sector mean reversion.
+- The diagnostic includes 178 electricity-like country-sector nodes and 3,729 one-year transition rows.
+
+Target diagnostics:
+
+- One-year electricity rEI has high volatility: standard deviation about 0.299, with p05 about -0.340 and p95 about 0.422.
+- Smoothed one-year rEI is more stable: standard deviation about 0.159.
+- Three-year annualized rEI is similarly stable: standard deviation about 0.163.
+- Winsorized one-year rEI reduces volatility relative to raw one-year rEI: standard deviation about 0.185.
+- China is only about 0.56% of electricity transition rows but about 25.2% of observed electricity emissions in the target diagnostic panel.
+
+Candidate rules compared:
+
+- `current_frontier_gap_readiness_reference`
+- `historical_frontier_gap_only_reference`
+- `electricity_sector_background_only`
+- `electricity_rolling_frontier_gap_only`
+- `electricity_dampened_frontier_gap_0_25`
+- `electricity_dampened_frontier_gap_0_50`
+- `electricity_dampened_frontier_gap_0_75`
+- `electricity_readiness_dampened_frontier_gap`
+- `electricity_gap_with_jump_shock_filter`
+- `electricity_high_emissions_dampened_gap`
+
+Rule comparison results:
+
+- The best aggregate electricity emissions fit in this diagnostic table is `electricity_rolling_frontier_gap_only`, followed closely by `electricity_dampened_frontier_gap_0_75`.
+- The Phase 20 recommendation chooses `electricity_dampened_frontier_gap_0_75` as the fixed dampened candidate because it improves both transition metrics and electricity aggregate emissions error relative to the current readiness reference.
+- `electricity_dampened_frontier_gap_0_75` has unweighted rEI MAE about 0.1648 and electricity aggregate emissions error about 28.0 million.
+- The current readiness reference has unweighted rEI MAE about 0.1775 and electricity aggregate emissions error about 30.8 million in this electricity-only diagnostic convention.
+- The historical frontier-gap-only reference has unweighted rEI MAE about 0.1787 and electricity aggregate emissions error about 31.7 million in this diagnostic convention.
+
+China electricity comparison:
+
+- China remains a special aggregate case.
+- The current readiness reference still has slightly lower China electricity emissions error than the dampened p75 diagnostic candidate in the Phase 20 table.
+- The dampened p75 candidate improves average electricity transition and sector aggregate metrics, but it is not yet a final China-specific solution.
+- China jump years such as 1998, 2005, and 2007 remain difficult because observed EI reductions are large and output is expanding rapidly.
+
+Jump-year diagnostics:
+
+- Jump years are only about 0.83% of transition rows but about 10.7% of observed electricity emissions.
+- The current readiness reference has jump-year rEI MAE about 0.264.
+- `electricity_dampened_frontier_gap_0_75` reduces jump-year rEI MAE to about 0.210 and lowers jump-year wrong-sign share to about 0.097.
+- The jump-filter rule also improves jump-year performance, but it does not beat the dampened p75 candidate on aggregate electricity emissions in this diagnostic comparison.
+
+Phase 20 recommendation:
+
+- Recommendation: `test_electricity_dampened_frontier_gap_as_candidate_rule`.
+- Evidence: the selected fixed candidate is `electricity_dampened_frontier_gap_0_75`.
+- Recommended Phase 21: test only this electricity-specific dampened frontier-gap rule as a diagnostic candidate while keeping scenarios blocked.
+- Do not make it the active default yet.
+- Keep `frontier_gap_readiness` as the temporary aggregate-safe historical base until a candidate rule is validated in the full multi-year loop.
+- Scenarios remain premature.
+
+## Phase 21 Structural-Signature Discovery and Parameter-Candidate Screening
+
+Phase 21 asks whether electricity-like behaviour can be explained by more general observable ABM v4 structural signatures before implementing an electricity-specific transition rule. It does not run scenarios, recalibrate emissions, implement a final dampening rule, change production dynamics, overwrite `config.py`, rebuild raw-T edges, or rerun the Phase 19 raw audit.
+
+Why Phase 21 did not immediately implement the Phase 20 electricity candidate:
+
+- Phase 20 showed that `electricity_dampened_frontier_gap_0_75` is promising inside electricity diagnostics.
+- But a sector-name exception would be theoretically weak if existing ABM v4 metrics already identify broader transition-inertia conditions.
+- Phase 21 therefore inventories available metrics and screens whether electricity-like nodes are distinguished by general structural properties such as systemic scale, emissions centrality, volatility/jump behaviour, brown lock-in, supplier constraints, capability constraints, and model-error signatures.
+
+Metric inventory:
+
+- The diagnostic found usable metric families for production scale, emissions scale, emissions intensity, transition dynamics, volatility/jump behaviour, frontier gap, network position, supplier structure, buyer/supplier opportunity structure, capability, green capability, ecosystem mapping, production feasibility, model-error signatures, and electricity-specific diagnostics.
+- The main node-year feature panel contains 108,130 rows.
+- The node-level structural-signature panel contains 4,915 country-sector nodes.
+
+Structural labels:
+
+- Electricity-like nodes: 189 nodes, about 38.7% of cumulative observed emissions and about 2.4% of cumulative observed output.
+- High-emissions nodes: 492 nodes, about 92.3% of cumulative observed emissions.
+- High-output nodes: 492 nodes, about 87.3% of cumulative observed output.
+- Jump-prone nodes: 10 nodes; all are electricity-like under the current jump evidence and account for about 28.1% of cumulative observed emissions.
+- Aggregate-sensitive nodes: 463 nodes, about 67.6% of cumulative observed emissions.
+- Needs-dampening nodes: 1,988 nodes, about 74.5% of cumulative observed emissions.
+
+Electricity structural signature:
+
+- Electricity-like nodes are strongly distinguished by high emissions-intensity level, high emissions scale, jump behaviour, and model-error signatures.
+- Top electricity discriminators include `mean_log_EI_observed`, `median_log_EI_observed`, `p95_log_EI_observed`, `max_log_EI_observed`, `max_log_emissions_observed`, `p95_log_emissions_observed`, and `share_frontier_gap_worsens_sign`.
+- Needs-dampening nodes are most directly identified by model-error signatures, especially `share_frontier_gap_worsens_emissions_error`, but structural EI-position metrics also carry signal.
+
+Non-electricity lookalikes:
+
+- The screen identifies non-electricity statistical lookalikes under the strongest electricity-discriminating metrics.
+- These include a mix of high-EI or error-sensitive non-electricity country-sectors rather than a clean infrastructure-only set.
+- This supports testing a generalized proxy, but it also warns against over-interpreting the proxy as a pure economic mechanism.
+
+Candidate transition-inertia proxies:
+
+- Candidate proxy table includes `systemic_scale_proxy`, `emissions_centrality_proxy`, `output_centrality_proxy`, `volatility_jump_proxy`, `brown_lockin_proxy`, `supplier_constraint_proxy`, `model_error_dampening_need_proxy`, and `composite_transition_inertia_proxy`.
+- Recommended-for-Phase-22 candidates include systemic scale, volatility/jump, brown lock-in, model-error dampening need, and the composite proxy.
+- The composite proxy is available and captures the strongest cross-family evidence, but it carries moderate overfitting risk because one component is model-error based.
+
+Phase 21 recommendation:
+
+- Recommendation: `build_composite_transition_inertia_proxy`.
+- Evidence: multiple structural families distinguish electricity-like nodes, especially systemic scale, volatility/jump behaviour, and emissions scale; model-error signatures still explain much of the dampening-need label.
+- Recommended Phase 22: test a transparent composite transition-inertia dampener diagnostically against both electricity and non-electricity difficult nodes.
+- Keep the Phase 20 electricity dampened candidate as a benchmark, not an active default.
+- Scenarios remain premature.
+
+## Phase 22 Essential-Input and Structural-Dependence Diagnostics
+
+Phase 22 does not proceed directly from Phase 21 to a high-EI/high-emissions composite proxy. The Phase 21 candidates are useful diagnostics, but they mostly describe symptoms: electricity is high-EI, high-emissions, volatile, and difficult for the emissions-transition rules to fit. Phase 22 instead asks whether electricity is structurally unusual in the IO network because it is an essential input: widely used by buyers, hard to substitute, persistent in supplier-buyer relationships, and systemically exposed downstream.
+
+Implementation scope:
+
+- No scenarios were created.
+- No final active dampening rule was implemented.
+- No emissions-transition recalibration was run.
+- `config.py` was not overwritten.
+- Production dynamics and historical production forcing were unchanged.
+- Phase 19 raw Eora audit was not rerun.
+- The full raw-T edge file was not rebuilt or loaded; diagnostics used compact ABM v4 supplier and historical edge outputs.
+
+Inputs used:
+
+- `supplier_updated_weights.parquet`
+- `supplier_opportunity_sets.parquet`
+- `historical_supplier_edges.parquet`
+- `abm_v4_state_panel_1995_2016.parquet`
+- Phase 21 structural-signature node panel
+
+Dependence metrics computed:
+
+- Buyer reach: buyer count, buyer country count, buyer sector count, buyer ecosystem count, buyer entropy, and buyer concentration.
+- Input universality: share of all buyers, buyer sector coverage, buyer ecosystem coverage, and cross-ecosystem buyer reach.
+- Buyer dependence: mean, median, p95, and max supplier share in buyer inputs, plus buyer dependency threshold counts.
+- Low substitutability: opportunity scarcity and approximate relationship-stability metrics from compact historical edges.
+- Systemic propagation potential: downstream output exposure, downstream emissions exposure, buyer output share, and buyer emissions share.
+- Diagnostic scores: essential input, low substitutability, systemic dependence, and structural dependence.
+
+Phase 22 output scale:
+
+- Supplier-buyer dependence rows: 550,508.
+- Supplier nodes with metrics: 4,531.
+
+Electricity dependence signature:
+
+- Electricity-like nodes are strongly distinguished by IO-dependence metrics, not only emissions symptoms.
+- Strong electricity contrasts include low substitutability, structural dependence, relationship stability, buyer dependence, input universality, and downstream exposure.
+- Electricity median percentile is high for key scores: structural dependence is about the 92.8th percentile, low substitutability about the 90.4th percentile, essential input about the 75.1st percentile, and input-universality/buyer reach about the 84.0th percentile under the candidate proxy table.
+- This supports the theoretical claim that electricity behaves partly like an essential infrastructure input.
+
+Dependence versus symptom metrics:
+
+- Dependence scores are not simply rediscovering high EI or high emissions.
+- Correlations with symptom metrics are moderate or low: for example, systemic dependence correlates about 0.606 with cumulative emissions share, while structural dependence correlates about 0.258 with cumulative emissions share and about 0.257 with mean log EI.
+- Essential input score has low correlations with mean log EI, cumulative emissions share, jump frequency, and frontier-gap error symptoms.
+- This suggests the IO-dependence metrics add a distinct structural concept.
+
+Non-electricity dependence lookalikes:
+
+- The top non-electricity lookalike is the `ROW / TOTAL` aggregate node, which is structurally broad but not theoretically clean.
+- Other high-dependence lookalikes include financial intermediation/business activities, electrical and machinery, petroleum/chemical/non-metallic mineral products, construction, mining and quarrying, and re-export/re-import nodes.
+- Some lookalikes are plausible foundational or systemically connected sectors, but the `ROW / TOTAL` and financial-service appearances require caution before turning the score into a model mechanism.
+
+Candidate structural-dependence proxies:
+
+- `essential_input_score`
+- `input_universality_score`
+- `buyer_dependence_score`
+- `low_substitutability_score`
+- `systemic_dependence_score`
+- `structural_dependence_score`
+- `structural_dependence_plus_brown_lockin`
+- `structural_dependence_plus_volatility`
+
+The candidate proxy table recommends these for Phase 23 diagnostics, but the recommendation is intentionally not a final rule. The evidence is strongest for identifying electricity-like essential-input structure and aggregate sensitivity. The relation to needs-dampening is present but weaker than the electricity/aggregate-sensitivity signal.
+
+Phase 22 recommendation:
+
+- Recommendation: `build_essential_input_dampener`.
+- Interpretation: dependence metrics identify electricity-like essential-input structure, but dampening evidence is weaker.
+- Recommended Phase 23: build only a diagnostic essential-input or structural-dependence dampener candidate and compare it against the Phase 20 electricity-specific candidate and existing rules.
+- Do not make the dampener active by default.
+- Keep scenarios blocked.
+- Scenarios remain premature.
+
+## Phase 23 Essential-Input Dampener Parameter Test
+
+Phase 23 tested whether the Phase 22 essential-input dependence signature can act as a historical emissions-transition dampener inside ABM v4. This remains an ABM v4 country-sector parameter test, not an ABM v5 agent-type implementation.
+
+The structural candidate rule was:
+
+```text
+rEI_i,t+1 =
+alpha_s,t
++ D_EID_i,t * rho * Gap_EI_i,t / (Gap_EI_i,t + tau)
+
+D_EID_i,t = clip(1 - lambda_EID * EID_i,t, d_min, 1)
+```
+
+The calibration-only historical residual variant was:
+
+```text
+rEI_i,t+1 =
+alpha_s,t
++ D_EID_i,t * P_hist_i * rho * Gap_EI_i,t / (Gap_EI_i,t + tau)
+
+P_hist_i = clip(1 + theta_i_shrunk, p_min, p_max)
+```
+
+`D_EID` is the structural mechanism candidate. `P_hist` is a bounded historical residual for missing policy, institutional, and energy-system variables. It is not scenario-facing.
+
+Candidate grid:
+
+- 157 candidates were evaluated.
+- Baselines: `frontier_gap_readiness_baseline` and `historical_frontier_gap_only_baseline`.
+- Structural scores: `essential_input_score_diagnostic`, `low_substitutability_score_diagnostic`, `systemic_dependence_score_diagnostic`, `structural_dependence_score_diagnostic`, plus cautious brown-lock-in and volatility composites.
+- Structural dampening grid: `lambda_EID` in `{0.25, 0.50, 0.75, 1.00}` and `d_min` in `{0.25, 0.50, 0.75}`.
+- Historical residual variants: country-sector with sector shrinkage, sector-only, and country-only residuals; shrinkage `k` in `{5, 10, 20}`; bounds `{0.75, 1.25}` and `{0.50, 1.50}`.
+- Train period: 1995-2010.
+- Validation period: 2011-2016.
+
+Best validation rows:
+
+- Historical frontier-gap-only baseline: emissions-weighted rEI MAE `0.13566`, electricity rEI MAE `0.19746`, China electricity rEI MAE `0.04814`, mean yearly aggregate emissions pct error `0.13469`.
+- Best EID-only candidate: `c0061`, `structural_dependence_plus_brown_lockin`, `lambda_EID=1.0`, `d_min=0.25`; emissions-weighted rEI MAE `0.09032`, electricity rEI MAE `0.18464`, China electricity rEI MAE `0.03793`, mean yearly aggregate emissions pct error `0.08940`.
+- Best residual-only candidate: sector residual, `k=5`; emissions-weighted rEI MAE `0.13315`, electricity rEI MAE `0.19819`, China electricity rEI MAE `0.05001`, mean yearly aggregate emissions pct error `0.13219`.
+- Best EID plus residual candidate: `c0102`, `essential_input_score_diagnostic`, `lambda_EID=0.75`, `d_min=0.50`, country-sector residual with sector shrinkage, `k=10`, bounds `0.75-1.25`; emissions-weighted rEI MAE `0.09962`, electricity rEI MAE `0.18480`, China electricity rEI MAE `0.03515`, mean yearly aggregate emissions pct error `0.09871`.
+
+Mechanism decomposition:
+
+- The best combined candidate used `essential_input_score_diagnostic`.
+- Mean `D_EID` was about `0.643`; electricity mean `D_EID` was about `0.502`; China electricity `D_EID` was `0.500`.
+- Mean `P_hist` was about `1.013`; China electricity `P_hist` was about `1.057`.
+- Structural-only validation gain was larger than residual-only gain.
+- `residual_dominates_flag=false`.
+- Interpretation: the structural dampener contributes independently; the residual is not the main source of improvement in the best combined result.
+
+Main interpretation:
+
+- The EID dampener improves electricity, China electricity, aggregate emissions, and all-node weighted transition metrics relative to the historical frontier-gap-only baseline.
+- The best EID-only row does not improve the current high-EID slice enough to clear all decision thresholds, so it should not be made active by default yet.
+- Historical residuals do not dominate the mechanism.
+- The result supports keeping essential-input dependence as a serious ABM v4 diagnostic mechanism and a possible ABM v5 agent-type clue, but not as a final active rule.
+
+Phase 23 recommendation:
+
+- Recommendation: `keep_EID_dampener_as_diagnostic_only`.
+- Recommended Phase 24: integrate the strongest EID dampener only as a diagnostic multi-year candidate, or inspect external policy and energy-system variables before any scenario-facing interpretation.
+- ABM v5 implication: possible `essential_input_agent` candidate if high-EID improvement holds out of sample and under multi-year integration.
+- Scenarios remain premature.
+
+## Phase 24 Essential-Input Dampener Failure Modes
+
+Phase 24 audited why the Phase 23 EID dampener helps electricity and aggregate emissions but does not cleanly validate across all high-EID nodes. It did not run scenarios, recalibrate, implement ABM v5, or make the dampener active.
+
+High-EID subtype composition:
+
+- `transport_logistics_infrastructure`: 246 nodes.
+- `ordinary_or_unclear`: 194 nodes.
+- `heavy_industry_materials`: 181 nodes.
+- `knowledge_finance_business_services`: 150 nodes.
+- `infrastructure_energy`: 138 nodes.
+- `public_social_services`: 135 nodes.
+- `manufacturing_system_core`: 74 nodes.
+- `construction_real_estate_foundational`: 70 nodes.
+- `accounting_or_pseudo_agent`: 9 nodes.
+
+Emissions concentration by subtype:
+
+- `infrastructure_energy` accounts for about 41.3% of observed emissions inside the high-EID audit set.
+- `heavy_industry_materials` accounts for about 18.5%.
+- `knowledge_finance_business_services` accounts for about 10.2%.
+- `accounting_or_pseudo_agent` accounts for about 5.0%, but these nodes should not become behavioural ABM v5 agents.
+
+Dampener performance by subtype:
+
+- The best Phase 23 EID-only candidate `c0061` improves emissions-weighted rEI MAE relative to historical frontier-gap-only for every audited subtype.
+- Improvement is clearest for accounting/pseudo-agent rows, heavy industry/materials, transport/logistics infrastructure, knowledge/business services, infrastructure energy, and construction/real-estate foundational nodes.
+- Because accounting/pseudo-agent rows improve mechanically but are not real behavioural units, they should be separated from any future agent-type training or ontology work.
+
+Failure modes:
+
+- `helped_by_EID`: 672 nodes.
+- `no_material_change`: 354 nodes.
+- `high_EID_but_not_physical_transition_sector`: 103 nodes.
+- `harmed_by_EID`: 40 nodes.
+- `high_EID_but_low_emissions_relevance`: 17 nodes.
+- `pseudo_agent_accounting_issue`: 9 nodes.
+
+Pseudo-agent/accounting audit:
+
+- 9 high-EID nodes are flagged as accounting or pseudo-agent categories.
+- These should be kept in accounting totals where needed, but excluded from ABM v5 behavioural agent-type training unless manually justified.
+
+ABM v5 implication:
+
+- Plausible future ontology candidates: `energy_infrastructure_agent`, `transport_logistics_infrastructure_agent`, and `heavy_industry_materials_agent`.
+- `systemic_service_agent` remains lower-confidence because structural centrality in services does not necessarily imply physical emissions-transition inertia.
+- `accounting_node_not_agent` is explicitly not supported as a behavioural type.
+
+Phase 24 recommendation:
+
+- Recommendation: `integrate_EID_candidate_in_multiyear_loop_for_audit`.
+- Interpretation: several coherent physical high-EID subtypes benefit from the diagnostic dampener.
+- Recommended Phase 25: test the strongest EID candidate in the multi-year loop as an audit candidate only, while keeping pseudo-agent categories separated and preserving the current default rule.
+- Scenarios remain premature.
+
+## Phase 25 EID Diagnostic Multi-Year Integration Audit
+
+Phase 25 integrated the best Phase 23/24 EID candidate into the recursive ABM v4 multi-year loop as a diagnostic mode only. It did not create scenarios, implement ABM v5, activate EID as a default rule, or alter production dynamics.
+
+Diagnostic transition mode:
+
+```text
+historical_frontier_gap_EID_diagnostic
+```
+
+EID diagnostic equation:
+
+```text
+rEI_i,t+1 =
+alpha_s,t
++ D_EID_i * rho * Gap_EI_i,t / (Gap_EI_i,t + tau)
+
+D_EID_i = clip(1 - EID_i, 0.25, 1.0)
+```
+
+Candidate used:
+
+- candidate id: `c0061`
+- variant: `essential_input_dampener_only`
+- score: `structural_dependence_plus_brown_lockin`
+- `lambda_EID = 1.0`
+- `d_min = 0.25`
+- no historical residual
+
+Separate diagnostic outputs were written under distinct filenames:
+
+- `base_multiyear_state_panel_EID_diagnostic.parquet`
+- `base_multiyear_summary_panel_EID_diagnostic.csv`
+- `multiyear_EID_diagnostic_error_panel.parquet`
+- `multiyear_EID_diagnostic_comparison.csv`
+- `multiyear_EID_diagnostic_by_subtype.csv`
+- `multiyear_EID_diagnostic_pseudo_agent_sensitivity.csv`
+- `multiyear_EID_diagnostic_mechanism_audit.csv`
+- `multiyear_EID_diagnostic_abm_v5_implications.csv`
+- `multiyear_EID_diagnostic_recommendation.csv`
+- `multiyear_EID_diagnostic_report.md`
+
+Full historical validation result:
+
+- The EID diagnostic mode was successfully integrated into the multi-year loop.
+- EID coverage was available from Phase 23 scores, and fallback diagnostics are written in the state panel and mechanism audit.
+- Compared with `historical_frontier_gap_only`, EID slightly worsened all-node unweighted rEI MAE: `0.14074` vs `0.14054`.
+- It worsened emissions-weighted rEI MAE: `0.12425` vs `0.12311`.
+- It slightly improved wrong-sign share: `0.38249` vs `0.38293`.
+- It materially worsened latest-year aggregate emissions pct error: `1.20200` vs `0.85542`.
+- It materially worsened mean yearly aggregate emissions pct error: `0.72721` vs `0.57123`.
+- It worsened electricity aggregate emissions error: `239.6M` vs `191.7M`.
+- It worsened China electricity emissions error: `207.2M` vs `163.7M`.
+
+Subtype result:
+
+- In the integrated multi-year loop, the EID dampener no longer reproduces the positive Phase 24 subtype-screen result.
+- `infrastructure_energy`, `manufacturing_system_core`, and `construction_real_estate_foundational` are materially worsened.
+- Physical subtype evidence is therefore not strong enough to promote the mechanism.
+
+Pseudo-agent sensitivity:
+
+- Pseudo-agent/accounting nodes are included in the sensitivity output.
+- The Phase 25 rejection does not depend on pseudo-agent improvement; the main issue is material aggregate deterioration.
+
+Mechanism audit:
+
+- The mechanism audit confirms that EID reduces frontier-gap closure where scores are available.
+- The problem is not that the dampener fails to apply; it applies, but recursive EI dynamics and emissions weighting turn the dampening into worse aggregate fit.
+
+ABM v5 implication:
+
+- The EID concept remains useful ontology evidence, especially for thinking about energy infrastructure, transport/logistics infrastructure, and heavy industry/materials.
+- It is not validated as a behavioural agent type.
+- No ABM v5 code or agent ontology was implemented.
+
+Phase 25 recommendation:
+
+- Recommendation: `reject_EID_for_v4`.
+- Interpretation: the integrated diagnostic EID mode materially worsens aggregate emissions validation.
+- Recommended Phase 26: do not promote EID to a base rule; keep scenarios blocked and move to explicit validation-objective selection or external policy/energy-system variables before further rule design.
+- Scenarios remain premature.
+
+## Phase 26 Adaptive EID Parameter Calibration Diagnostics
+
+Phase 26 tested whether the Phase 25 EID failure came from the fixed strong dampener rather than from the EID concept itself. The phase used discrete walk-forward diagnostics only. It did not create scenarios, implement ABM v5, activate adaptive EID as a default, recalibrate production, overwrite `config.py`, or modify v1/v2/v3 source or protected outputs.
+
+Adaptive EID dampener:
+
+```text
+D_EID = clip(1 - lambda_EID * EID_norm, d_min, 1.0)
+```
+
+The diagnostic grid tested:
+
+- `lambda_EID`: 0.00, 0.25, 0.50, 0.75, 1.00.
+- `d_min`: 0.25, 0.50, 0.75, 1.00.
+- Primary walk-forward design: 5-year calibration, next 3-year validation.
+- Robustness design: 3-year calibration, next 2-year validation.
+- Objectives: transition accuracy, emissions-weighted transition accuracy, aggregate emissions fit, balanced policy objective, and electricity/high-EID objective.
+
+The best adaptive row in the diagnostic comparison used the 5-year design with the balanced objective. It improved some aggregate-style diagnostic values in the walk-forward panel, but did not beat the historical frontier-gap baseline on the main transition-validation thresholds. Relative to `historical_frontier_gap_only`, the best adaptive result materially worsened all-node rEI MAE and emissions-weighted rEI MAE. The Phase 26 recommendation is therefore `reject_EID_for_v4_confirmed`.
+
+Parameter stability was weak. Selected `lambda_EID` and `d_min` changed across windows, and many objectives often selected no-effect or weak-effect settings such as `lambda_EID = 0` or `d_min = 1`. This supports the interpretation that EID may be regime-dependent, or that it needs missing policy, investment, energy-system, and institutional counterforces that ABM v4 does not currently observe.
+
+Hypothesis outcomes:
+
+- H1 fixed EID too rigid: not supported as a rescue mechanism, because adaptive EID did not improve forward validation enough.
+- H2 EID regime-dependent: supported by parameter instability.
+- H3 fixed EID too strong: supported by frequent weak/no-effect selections.
+- H4 subtype-specific EID: supported diagnostically, but not enough for a v4 rule.
+- H5 EID diagnostic only: supported.
+- H6 missing policy or energy counterforces: supported as an interpretation of unstable parameters.
+- H7 adaptive calibration overfitting: supported where calibration-window gains did not translate into robust forward validation.
+
+Phase 26 recommendation:
+
+- Recommendation: `reject_EID_for_v4_confirmed`.
+- Interpretation: adaptive parameter search does not rescue EID as an ABM v4 transition rule.
+- Recommended Phase 27: keep scenarios blocked; either move to validation-objective selection among existing non-EID baselines, or document the need for external policy/energy-system variables before another EID-style mechanism is tested.
+- ABM v5 implication: EID remains ontology evidence only, not a validated agent-type mechanism.
+- Scenarios remain premature.
+
+## Phase 27 Q Energy-Mix Audit and Transition-Error Diagnostics
+
+Phase 27 opened one final ABM v4 diagnostic branch after EID was rejected for ABM v4. The motivation was to test a more direct mechanism for electricity and high-emissions sectors: country-sector energy-use mix from Eora Q rows. This phase did not implement scenarios, ABM v5, an energy-mix transition rule, or any active default change.
+
+The audit uses the converted Eora Q matrices under `data/parquet/<year>/Q.parquet` and row labels from `labels_Q.txt` or `data/indices/index_q.csv` when available. The nine canonical energy-use rows were matched:
+
+- Natural Gas
+- Coal
+- Petroleum
+- Nuclear Electricity
+- Hydroelectric Electricity
+- Geothermal Electricity
+- Wind Electricity
+- Solar, Tide and Wave Electricity
+- Biomass and Waste Electricity
+
+The diagnostic constructs country-sector-year Q energy-use mix variables:
+
+- fossil energy: natural gas + coal + petroleum
+- clean electricity: nuclear + hydro + geothermal + wind + solar/tide/wave + biomass/waste
+- renewable electricity: hydro + geothermal + wind + solar/tide/wave + biomass/waste
+- shares, HHI, entropy, fossil-to-clean ratio, coal-to-clean ratio, and energy-per-output intensities
+
+Interpretation guardrail: these are `Q energy-use mix` variables, not confirmed electricity generation mix variables.
+
+Real-data audit result:
+
+- Q energy source inventory was written.
+- Row mapping was written.
+- Energy mix panel rows: 108,152.
+- Recommendation: `aggregate_only_energy_mix_usable`.
+- Scenarios remain premature.
+
+Hypothesis outcomes:
+
+- H1 energy mix data usable: not fully supported at country-sector rule level because quality caveats remain.
+- H2 energy mix explains errors better than EID: not supported strongly enough by the current univariate screen.
+- H3 China electricity fuel-mix mechanism: supported; China electricity shows high fossil dependence in the Q mix.
+- H4 physical-subtype-only usefulness: not supported strongly enough in this screen.
+- H5 energy mix too sparse or noisy: supported as a country-sector modelling warning due to jump/plausibility caveats.
+- H6 energy mix may resolve the frontier tradeoff: supported diagnostically by predictors related to the historical-vs-readiness error difference.
+
+Phase 27 recommendation:
+
+- Recommendation: `aggregate_only_energy_mix_usable`.
+- Interpretation: Q energy mix is promising as context and aggregate validation evidence, but is not yet clean enough for a country-sector ABM v4 transition rule.
+- Recommended Phase 28: inspect mapping and aggregate plausibility before any model-use step, or use Q energy mix as a validation stratifier rather than a rule.
+- ABM v5 implication: fuel and energy-use mix remains an important candidate mechanism for a future data-design pass.
+- Scenarios remain premature.
+
 ## Extension from ABM v3
 
 ABM v4 introduces a separate namespace and output root. It can inspect ABM v3 outputs as preferred inputs, but writes only under `data/abm_v4/` when explicitly run.
@@ -1752,6 +2330,176 @@ Audit Phase 18 electricity and China EI data:
 ```powershell
 python scripts/run_abm_v4_base.py --audit-electricity-data --create-output-dirs
 ```
+
+Audit Phase 19 raw Eora-derived electricity data path:
+
+```powershell
+python scripts/run_abm_v4_base.py --audit-raw-eora-electricity-data --create-output-dirs
+```
+
+Diagnose Phase 20 electricity-specific transition regime candidates:
+
+```powershell
+python scripts/run_abm_v4_base.py --diagnose-electricity-transition-regime --create-output-dirs
+```
+
+Diagnose Phase 21 structural signatures and transition-inertia proxy candidates:
+
+```powershell
+python scripts/run_abm_v4_base.py --diagnose-structural-signatures --create-output-dirs
+```
+
+Diagnose Phase 22 essential-input and IO structural-dependence signatures:
+
+```powershell
+python scripts/run_abm_v4_base.py --diagnose-essential-input-dependence --create-output-dirs
+```
+
+Test Phase 23 essential-input dampener candidates:
+
+```powershell
+python scripts/run_abm_v4_base.py --test-essential-input-dampener --create-output-dirs
+```
+
+Diagnose Phase 24 EID dampener failure modes and high-EID heterogeneity:
+
+```powershell
+python scripts/run_abm_v4_base.py --diagnose-eid-failure-modes --create-output-dirs
+```
+
+Run Phase 25 EID diagnostic multi-year integration audit:
+
+```powershell
+python scripts/run_abm_v4_base.py --run-multiyear-EID-diagnostic --create-output-dirs --reuse-existing
+```
+
+Diagnose Phase 26 adaptive EID calibration:
+
+```powershell
+python scripts/run_abm_v4_base.py --diagnose-adaptive-EID-calibration --create-output-dirs
+```
+
+Audit Phase 27 Q energy mix and transition-error diagnostics:
+
+```powershell
+python scripts/run_abm_v4_base.py --audit-q-energy-mix --create-output-dirs
+```
+
+Finalize Phase 28 ABM v4 consolidation and two-rule validation framework:
+
+```powershell
+python scripts/run_abm_v4_base.py --finalize-abm-v4 --create-output-dirs
+```
+
+## Phase 28 Final Consolidation
+
+Phase 28 freezes ABM v4 as a historically validated diagnostic framework. It does not create scenarios, does not implement ABM v5 agent types, does not add a new transition rule, and does not overwrite `config.py`.
+
+Phase 27 recap:
+
+- All nine intended Q energy-use rows were found and mapped: natural gas, coal, petroleum, nuclear electricity, hydroelectricity, geothermal electricity, wind electricity, solar/tide/wave electricity, and biomass/waste electricity.
+- Q energy mix supports the fuel-structure mechanism conceptually, especially for China electricity and high-emissions electricity-like nodes.
+- Country-sector quality is not strong enough for ABM v4 behavioural rule integration because the audits report invalid shares, negative values, severe aggregate plausibility flags, and weak node-level predictive power.
+- Final Q recommendation: `aggregate_only_energy_mix_usable`.
+
+Final ABM v4 status:
+
+- ABM v4 is a historical diagnostic framework for country-sector production-network transition validation.
+- ABM v4 is not scenario-ready and should not be presented as a policy-counterfactual forecasting model.
+- Historical production forcing remains central, so scenario use requires a future endogenous production layer.
+
+Two-rule framework:
+
+| Rule | Final role | Scenario status |
+| --- | --- | --- |
+| `frontier_gap_readiness` | Aggregate-safe historical baseline | `not_scenario_ready` |
+| `historical_frontier_gap_only` | Transition-mechanism benchmark | `not_scenario_ready` |
+
+Rejected or diagnostic-only mechanisms:
+
+- `legacy_raw_log emissions rule`: rejected as the final rule; retained only as a baseline foil.
+- `fixed EID dampener`: rejected for ABM v4 transition-rule use; retained as ontology evidence.
+- `adaptive EID dampener`: rejected for ABM v4 transition-rule use; retained as ontology and overfitting evidence.
+- `EID diagnostic multi-year mode`: diagnostic only.
+- `Q energy mix country-sector transition rule`: rejected for ABM v4 node-level rule integration; retained for aggregate diagnostics and ABM v5 fuel-mechanism design.
+- `historical residual as scenario-facing rule`: rejected because it leaks historical validation information.
+
+Model boundary statement:
+
+ABM v4 is useful for testing transition mechanisms under observed production forcing, identifying validation trade-offs, and locating missing mechanisms. It is not a scenario-ready forecasting model, not a policy-counterfactual simulator, not a fully agent-typed ABM, and not a complete energy-system transition model.
+
+Scenario readiness status:
+
+`not_scenario_ready`. Blocking issues include the two-rule validation-objective trade-off, historically forced production, missing fuel/policy mechanisms, insufficient node-level Q energy data quality, and unresolved endogenous supplier/capability/production dynamics.
+
+ABM v5 research agenda:
+
+- Energy/fuel structure using cleaner external generation, fuel-use, and capacity data.
+- Policy/institutional regimes using renewable policy, investment, carbon-pricing, coal-phaseout, and subsidy variables.
+- Capital-stock inertia using asset age, capacity, capital stock, and plant-level data.
+- Explicit agent ontology separating ordinary production, energy infrastructure, heavy industry/materials, transport/logistics, systemic services, and accounting/non-agent nodes.
+- Endogenous production dynamics without historical forcing.
+
+Portfolio narrative pointer:
+
+ABM v4 can be presented as a rigorous research pipeline that tested network frontier dynamics, exposed a trade-off between aggregate emissions fit and transition-mechanism fit, stress-tested EID and energy-mix explanations, and concluded honestly that scenario modelling requires explicit energy, policy, capital-stock, and endogenous production mechanisms.
+
+Phase 28 outputs:
+
+- `data/abm_v4/validation/final_abm_v4_input_availability.csv`
+- `data/abm_v4/validation/final_surviving_rule_comparison.csv`
+- `data/abm_v4/validation/final_validation_objective_matrix.csv`
+- `data/abm_v4/validation/final_rejected_mechanism_register.csv`
+- `data/abm_v4/validation/final_model_boundary_statement.md`
+- `data/abm_v4/validation/final_scenario_readiness_assessment.csv`
+- `data/abm_v4/validation/final_abm_v5_research_agenda.csv`
+- `data/abm_v4/validation/final_abm_v4_hypothesis_status.csv`
+- `data/abm_v4/validation/final_abm_v4_consolidation_report.md`
+- `data/abm_v4/validation/final_abm_v4_portfolio_summary.md`
+
+## Phase 29A Final Plots and Tables
+
+Phase 29A builds final quantitative and visual artifacts from the Phase 28 validation outputs. It is not a modelling phase, does not create scenarios, does not implement ABM v5, and does not add a new transition rule.
+
+Generated final clean tables:
+
+- `data/abm_v4/final/tables/final_two_rule_summary.csv`
+- `data/abm_v4/final/tables/final_mechanism_status.csv`
+- `data/abm_v4/final/tables/final_scenario_blockers.csv`
+- `data/abm_v4/final/tables/final_abm_v5_priorities.csv`
+- `data/abm_v4/final/tables/final_portfolio_metrics.csv`
+- `data/abm_v4/final/tables/final_report_table_index.csv`
+
+Generated final plots:
+
+- `data/abm_v4/final/plots/abm_v4_two_rule_tradeoff.png`
+- `data/abm_v4/final/plots/abm_v4_two_rule_tradeoff.svg`
+- `data/abm_v4/final/plots/abm_v4_validation_objective_matrix.png`
+- `data/abm_v4/final/plots/abm_v4_validation_objective_matrix.svg`
+- `data/abm_v4/final/plots/abm_v4_mechanism_funnel.png`
+- `data/abm_v4/final/plots/abm_v4_mechanism_funnel.svg`
+- `data/abm_v4/final/plots/abm_v4_scenario_readiness_blockers.png`
+- `data/abm_v4/final/plots/abm_v4_scenario_readiness_blockers.svg`
+- `data/abm_v4/final/plots/abm_v4_abm_v5_research_priorities.png`
+- `data/abm_v4/final/plots/abm_v4_abm_v5_research_priorities.svg`
+- `data/abm_v4/final/plots/abm_v4_portfolio_story_map.png`
+- `data/abm_v4/final/plots/abm_v4_portfolio_story_map.svg`
+- `data/abm_v4/final/plots/abm_v4_hypothesis_status.png`
+- `data/abm_v4/final/plots/abm_v4_hypothesis_status.svg`
+
+Portfolio-ready copies of the same plot files are written under:
+
+```text
+outputs/plots/abm_v4_final/
+```
+
+The final artifact index is:
+
+```text
+data/abm_v4/final/abm_v4_final_artifact_index.csv
+```
+
+The final LaTeX technical report and portfolio webpage are intentionally not generated by Codex in this phase. The next step is a human-written final LaTeX report and portfolio webpage that use the Phase 29A tables and plots as source artifacts.
 
 ## Output Root
 

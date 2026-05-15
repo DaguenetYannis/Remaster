@@ -13,9 +13,11 @@ from src.abm_v4.emissions import (
     EmissionsTransitionHypothesisDiagnostics,
     EmissionsTransitionVariantComparator,
     EmissionsUpdater,
+    HISTORICAL_FRONTIER_GAP_EID_DIAGNOSTIC_MODE,
 )
 from src.abm_v4.paths import ABMV4Paths
 from src.abm_v4.production import ProductionFeasibilityEngine
+from src.abm_v4.reporting import ABMV4FinalArtifactBuilder
 from src.abm_v4.simulation import (
     MultiYearBaseSimulator,
     inspect_base_model_readiness,
@@ -25,8 +27,18 @@ from src.abm_v4.state import build_state_panel, repair_capability_coverage
 from src.abm_v4.suppliers import SupplierNetworkBuilder
 from src.abm_v4.validation import MultiYearHistoricalValidator
 from src.abm_v4.validation import (
+    ABMV4FinalConsolidator,
     ElectricityDataAudit,
+    ElectricityTransitionRegimeDiagnostics,
+    EssentialInputDampenerTester,
+    EssentialInputDependenceDiagnostics,
+    EssentialInputFailureModeDiagnostics,
+    AdaptiveEIDCalibrationDiagnostics,
     HighEmissionsDampeningDiagnostics,
+    MultiYearEIDDiagnosticValidator,
+    QEnergyMixAudit,
+    RawEoraElectricityDataAudit,
+    StructuralSignatureDiagnostics,
     TransitionRuleTradeoffDiagnostics,
     build_multiyear_base_model_comparison,
     write_multiyear_base_model_comparison,
@@ -101,7 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--emissions-transition-mode",
-        choices=("frontier_gap_readiness", "legacy_raw_log", "historical_frontier_gap_only"),
+        choices=("frontier_gap_readiness", "legacy_raw_log", "historical_frontier_gap_only", HISTORICAL_FRONTIER_GAP_EID_DIAGNOSTIC_MODE),
         default=None,
         help="Emissions transition rule to use for --build-emissions-update.",
     )
@@ -124,6 +136,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--run-multiyear-base",
         action="store_true",
         help="Run Phase 10 historical multi-year ABM v4 base simulation.",
+    )
+    parser.add_argument(
+        "--run-multiyear-EID-diagnostic",
+        action="store_true",
+        help="Run Phase 25 EID diagnostic multi-year integration audit.",
     )
     parser.add_argument(
         "--validate-multiyear-base",
@@ -164,6 +181,56 @@ def build_parser() -> argparse.ArgumentParser:
         "--audit-electricity-data",
         action="store_true",
         help="Build Phase 18 electricity and China EI data audit diagnostics.",
+    )
+    parser.add_argument(
+        "--audit-raw-eora-electricity-data",
+        action="store_true",
+        help="Build Phase 19 raw Eora-derived electricity data path audit diagnostics.",
+    )
+    parser.add_argument(
+        "--diagnose-electricity-transition-regime",
+        action="store_true",
+        help="Build Phase 20 electricity-specific transition regime diagnostics.",
+    )
+    parser.add_argument(
+        "--diagnose-structural-signatures",
+        action="store_true",
+        help="Build Phase 21 structural-signature discovery and transition-inertia proxy diagnostics.",
+    )
+    parser.add_argument(
+        "--diagnose-essential-input-dependence",
+        action="store_true",
+        help="Build Phase 22 essential-input and IO structural-dependence diagnostics.",
+    )
+    parser.add_argument(
+        "--test-essential-input-dampener",
+        action="store_true",
+        help="Build Phase 23 essential-input dampener candidate validation diagnostics.",
+    )
+    parser.add_argument(
+        "--diagnose-eid-failure-modes",
+        action="store_true",
+        help="Build Phase 24 high-EID dampener failure-mode and heterogeneity diagnostics.",
+    )
+    parser.add_argument(
+        "--diagnose-adaptive-EID-calibration",
+        action="store_true",
+        help="Build Phase 26 adaptive EID calibration diagnostics.",
+    )
+    parser.add_argument(
+        "--audit-q-energy-mix",
+        action="store_true",
+        help="Build Phase 27 Eora Q energy-mix audit and transition-error diagnostics.",
+    )
+    parser.add_argument(
+        "--finalize-abm-v4",
+        action="store_true",
+        help="Build Phase 28 final ABM v4 consolidation and two-rule validation outputs.",
+    )
+    parser.add_argument(
+        "--build-final-abm-v4-plots-tables",
+        action="store_true",
+        help="Build Phase 29A final ABM v4 plots, clean tables, and artifact index.",
     )
     parser.add_argument("--calibration-random-search-iterations", type=int, default=200)
     parser.add_argument("--calibration-seed", type=int, default=42)
@@ -692,6 +759,34 @@ def main() -> None:
             print(f"Validation report: {paths.base_multiyear_validation_report_path}")
         return
 
+    if args.run_multiyear_EID_diagnostic:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--run-multiyear-EID-diagnostic requires --create-output-dirs to write diagnostic outputs."
+            )
+        simulator = MultiYearBaseSimulator(
+            paths=paths,
+            config=config,
+            historical_production_forcing=args.historical_production_forcing,
+            reuse_existing=args.reuse_existing,
+            emissions_transition_mode=HISTORICAL_FRONTIER_GAP_EID_DIAGNOSTIC_MODE,
+            emissions_parameter_file=args.emissions_parameter_file,
+        )
+        result = simulator.run()
+        simulator.write_outputs(result)
+        validator = MultiYearEIDDiagnosticValidator(paths=paths)
+        validation = validator.run()
+        validator.write_outputs(validation)
+        recommendation = validation.recommendation.to_dicts()[0]
+        validation_row = result.validation_report.to_dicts()[0]
+        print("Ran ABM v4 EID diagnostic multi-year integration audit.")
+        print(f"Years: {validation_row['simulation_start_year']}-{validation_row['simulation_end_year']}")
+        print(f"Status: {validation_row['status']}")
+        print(f"Recommendation: {recommendation['recommendation']}")
+        print(f"State panel: {paths.base_multiyear_state_panel_EID_diagnostic_path}")
+        print(f"Validation report: {paths.multiyear_EID_diagnostic_report_path}")
+        return
+
     if args.validate_multiyear_base:
         if not args.create_output_dirs:
             raise SystemExit(
@@ -834,6 +929,157 @@ def main() -> None:
         print(f"Recommendation: {recommendation['recommended_next_action']}")
         print(f"Electricity nodes: {result.inventory.height}")
         print(f"Phase 18 report: {paths.electricity_data_audit_report_path}")
+        return
+
+    if args.audit_raw_eora_electricity_data:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--audit-raw-eora-electricity-data requires --create-output-dirs to write validation outputs."
+            )
+        audit = RawEoraElectricityDataAudit(paths=paths, start_year=config.start_year, end_year=config.end_year)
+        result = audit.run()
+        audit.write_outputs(result)
+        recommendation = result.recommendation.to_dicts()[0]
+        print("Built ABM v4 raw Eora-derived electricity data path audit.")
+        print(f"Recommendation: {recommendation['recommended_next_action']}")
+        print(f"Usable sources: {result.source_inventory.filter(pl.col('usable_for_china_electricity')).height}")
+        print(f"Phase 19 report: {paths.raw_eora_electricity_data_audit_report_path}")
+        return
+
+    if args.diagnose_electricity_transition_regime:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--diagnose-electricity-transition-regime requires --create-output-dirs to write validation outputs."
+            )
+        diagnostics = ElectricityTransitionRegimeDiagnostics(paths=paths, start_year=config.start_year, end_year=config.end_year)
+        result = diagnostics.run()
+        diagnostics.write_outputs(result)
+        recommendation = result.recommendation.to_dicts()[0]
+        print("Built ABM v4 electricity transition regime diagnostics.")
+        print(f"Recommendation: {recommendation['recommendation']}")
+        print(f"Rules compared: {result.rule_comparison.height}")
+        print(f"Phase 20 report: {paths.electricity_transition_regime_report_path}")
+        return
+
+    if args.diagnose_structural_signatures:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--diagnose-structural-signatures requires --create-output-dirs to write validation outputs."
+            )
+        diagnostics = StructuralSignatureDiagnostics(paths=paths, start_year=config.start_year, end_year=config.end_year)
+        result = diagnostics.run()
+        diagnostics.write_outputs(result)
+        recommendation = result.recommendation.to_dicts()[0]
+        print("Built ABM v4 structural-signature diagnostics.")
+        print(f"Recommendation: {recommendation['recommendation']}")
+        print(f"Node-year rows: {result.node_year_panel.height}")
+        print(f"Phase 21 report: {paths.structural_signature_report_path}")
+        return
+
+    if args.diagnose_essential_input_dependence:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--diagnose-essential-input-dependence requires --create-output-dirs to write validation outputs."
+            )
+        diagnostics = EssentialInputDependenceDiagnostics(paths=paths, start_year=config.start_year, end_year=config.end_year)
+        result = diagnostics.run()
+        diagnostics.write_outputs(result)
+        recommendation = result.recommendation.to_dicts()[0]
+        print("Built ABM v4 essential-input dependence diagnostics.")
+        print(f"Recommendation: {recommendation['recommendation']}")
+        print(f"Supplier-buyer rows: {result.supplier_buyer_panel.height}")
+        print(f"Phase 22 report: {paths.essential_input_dependence_report_path}")
+        return
+
+    if args.test_essential_input_dampener:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--test-essential-input-dampener requires --create-output-dirs to write validation outputs."
+            )
+        tester = EssentialInputDampenerTester(paths=paths)
+        result = tester.run()
+        tester.write_outputs(result)
+        recommendation = result.recommendation.to_dicts()[0]
+        print("Built ABM v4 essential-input dampener candidate diagnostics.")
+        print(f"Recommendation: {recommendation['recommendation']}")
+        print(f"Candidates: {result.candidate_grid.height}")
+        print(f"Phase 23 report: {paths.essential_input_dampener_report_path}")
+        return
+
+    if args.diagnose_eid_failure_modes:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--diagnose-eid-failure-modes requires --create-output-dirs to write validation outputs."
+            )
+        diagnostics = EssentialInputFailureModeDiagnostics(paths=paths)
+        result = diagnostics.run()
+        diagnostics.write_outputs(result)
+        recommendation = result.recommendation.to_dicts()[0]
+        print("Built ABM v4 EID dampener failure-mode diagnostics.")
+        print(f"Recommendation: {recommendation['recommendation']}")
+        print(f"High-EID rows: {result.heterogeneity_panel.height}")
+        print(f"Phase 24 report: {paths.eid_failure_mode_report_path}")
+        return
+
+    if args.diagnose_adaptive_EID_calibration:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--diagnose-adaptive-EID-calibration requires --create-output-dirs to write validation outputs."
+            )
+        diagnostics = AdaptiveEIDCalibrationDiagnostics(paths=paths)
+        result = diagnostics.run()
+        diagnostics.write_outputs(result)
+        recommendation = result.recommendation.to_dicts()[0]
+        print("Built ABM v4 adaptive EID calibration diagnostics.")
+        print(f"Recommendation: {recommendation['recommendation']}")
+        print(f"Windows: {result.windows.height}")
+        print(f"Phase 26 report: {paths.adaptive_EID_report_path}")
+        return
+
+    if args.audit_q_energy_mix:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--audit-q-energy-mix requires --create-output-dirs to write validation outputs."
+            )
+        audit = QEnergyMixAudit(paths=paths, start_year=config.start_year, end_year=config.end_year)
+        result = audit.run()
+        audit.write_outputs(result)
+        recommendation = result.recommendation.to_dicts()[0]
+        print("Built ABM v4 Q energy-mix audit diagnostics.")
+        print(f"Recommendation: {recommendation['recommendation']}")
+        print(f"Energy mix rows: {result.energy_mix_panel.height}")
+        print(f"Phase 27 report: {paths.q_energy_mix_report_path}")
+        return
+
+    if args.finalize_abm_v4:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--finalize-abm-v4 requires --create-output-dirs to write validation outputs."
+            )
+        consolidator = ABMV4FinalConsolidator(paths)
+        result = consolidator.run()
+        consolidator.write_outputs(result)
+        readiness = result.scenario_readiness_assessment.filter(
+            pl.col("readiness_dimension") == "overall_scenario_readiness"
+        ).to_dicts()[0]
+        print("Built ABM v4 final consolidation outputs.")
+        print(f"Surviving rules: {result.surviving_rule_comparison.height}")
+        print(f"Overall scenario readiness: {readiness['status']}")
+        print(f"Final report: {paths.final_abm_v4_consolidation_report_path}")
+        return
+
+    if args.build_final_abm_v4_plots_tables:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--build-final-abm-v4-plots-tables requires --create-output-dirs to write final artifacts."
+            )
+        builder = ABMV4FinalArtifactBuilder(paths)
+        result = builder.run(write_outputs=True)
+        print("Built ABM v4 final plots, clean tables, and artifact index.")
+        print(f"Final tables: {len(result.table_paths)}")
+        print(f"Final plot files: {len(result.plot_paths)}")
+        print(f"Portfolio plot copies: {len(result.copied_plot_paths)}")
+        print(f"Artifact index: {result.artifact_index_path}")
         return
 
     if args.create_output_dirs:
