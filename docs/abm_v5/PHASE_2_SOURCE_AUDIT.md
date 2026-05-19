@@ -164,3 +164,14 @@ Regime fields remain nullable placeholders for Phase 3. Phase 2.6 does not
 discover regimes, compute thresholds, assign labels, run clustering, simulate
 transition dynamics, execute scenarios, or treat supplier candidates as active
 supplier-choice behaviour.
+
+## Post-Phase-2 Diagnostic Visual Layer
+
+A diagnostics-only visual layer was added after Phase 2 to inspect the empirical
+terrain created by the accounting, capability, network, and phase-space panels.
+It writes compact tables under `data/abm_v5/diagnostics/` and PNG figures under
+`outputs/plots/abm_v5/diagnostics/`.
+
+The visuals are explicitly labeled as Phase 2 diagnostic exploration. They do
+not discover regimes, compute thresholds, cluster nodes, simulate dynamics, run
+scenarios, or interpret design-target placeholders as observed evidence.
