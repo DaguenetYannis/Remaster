@@ -149,3 +149,18 @@ coverage rules. Same-sector fallback candidates are added only as opportunity
 candidates when coverage or supplier-count criteria are not met, and they do
 not receive fabricated transaction values, supplier weights, or technical
 coefficients.
+
+## Phase 2.6 Note
+
+Phase 2.6 joins the observed accounting, capability, and production-network
+diagnostic panels into
+`data/abm_v5/phase_space/historical_phase_space_panel_1995_2016.parquet`.
+This is an observed state-space construction step only. It computes the
+sector-year emissions-intensity gap, stores available empirical phase-space
+coordinates, and records completeness/readiness metadata while keeping
+unavailable design-target variables explicit.
+
+Regime fields remain nullable placeholders for Phase 3. Phase 2.6 does not
+discover regimes, compute thresholds, assign labels, run clustering, simulate
+transition dynamics, execute scenarios, or treat supplier candidates as active
+supplier-choice behaviour.
