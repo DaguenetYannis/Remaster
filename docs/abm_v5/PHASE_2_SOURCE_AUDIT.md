@@ -93,3 +93,59 @@ The accounting panel contains local variables only: `output`, `final_demand`,
 `emissions`, `emissions_intensity`, and `local_greenness`. It does not compute
 network green exposure, brown centrality, phase-space position, regimes,
 thresholds, simulations, scenarios, or plots.
+
+## Phase 2.4 Note
+
+Phase 2.4 maps processed Atlas capability variables into canonical ABM v5
+capability and ecosystem state columns for 1995-2016. Capabilities are treated
+as productive feasibility constraints, not proof of low-carbon production.
+`green_capability` remains distinct from both `local_greenness` and future
+`network_green_exposure`.
+
+Missing design-target variables are preserved as explicit null columns with
+availability flags set to false. Accounting validity flags from Phase 2.3 are
+carried through without correction or imputation. This phase does not compute
+capability accumulation, directed ecosystem metrics, network green exposure,
+brown centrality, phase-space positions, regimes, thresholds, simulations,
+scenarios, or plots.
+
+## Phase 2.5 Note
+
+Phase 2.5 constructs two distinct historical network panels for 1995-2016:
+production-network supplier-buyer edges from raw Eora `T`, and node-level
+network diagnostics derived from those production links plus local accounting
+variables. The raw `T` convention follows the repository's validated supplier
+orientation: rows are suppliers and columns are buyers.
+
+This phase keeps production feasibility structure separate from embodied-carbon
+diagnostics. Supplier edges are based on `T`, not embodied emissions. The
+edge-level `embodied_emissions_flow` column is an explicit null placeholder in
+this subphase; ET or Leontief-based embodied-carbon construction is not folded
+into supplier weights. `network_green_exposure`, `brown_centrality`, and
+`supplier_lock_in` are diagnostics only, not behavioural supplier substitution
+rules.
+
+Phase 2.5 does not implement supplier choice, supplier rewiring, production
+feasibility calculations, threshold discovery, regime discovery, simulations,
+scenarios, or plots.
+
+### Phase 2.5 Patch: Supplier Candidate Compaction
+
+The real 1995 raw `T` smoke check produced more than 24 million positive
+production links for one year. Saving the full dense positive `T` edge panel as
+the ABM v5 working supplier-network layer would make the historical backbone
+unnecessarily large and difficult to inspect.
+
+ABM v5 therefore follows the useful construction separation already learned in
+ABM v4: raw supplier edges are yearly construction material, while the canonical
+working output is a compact supplier candidate base. The canonical supplier
+network file is now
+`data/abm_v5/supplier_network/supplier_candidate_panel_1995_2016.parquet`.
+
+Supplier candidates encode opportunity structure only. They are not supplier
+choice, rewiring, substitution, production feasibility, or scenario logic.
+Historical candidates are retained from raw `T` using top-minimum, weight, and
+coverage rules. Same-sector fallback candidates are added only as opportunity
+candidates when coverage or supplier-count criteria are not met, and they do
+not receive fabricated transaction values, supplier weights, or technical
+coefficients.
