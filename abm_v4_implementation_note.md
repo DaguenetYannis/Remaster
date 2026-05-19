@@ -1,5 +1,85 @@
 # ABM v4 Implementation Note
 
+## Phase 29C Final Visual Polish and Plot Replacement
+
+Phase 29C adds the final polished visual layer for ABM v4. It is a visual-only phase: no model logic, scenarios, ABM v5 code, LaTeX, webpage files, transition rules, `config.py`, or ABM v1/v2/v3 sources are changed.
+
+Phase 29C keeps the strongest Phase 29B concepts but replaces weak report visuals:
+
+- Kept and polished: architecture layers, emissions decomposition logic, capability source coverage, Q energy boundary, China electricity boundary case, scenario readiness checklist, and ABM v4 to ABM v5 roadmap.
+- Replaced: the two-rule scatter is replaced by `abm_v4_two_rule_scorecard`; the mechanism decision tree is replaced by `abm_v4_mechanism_status_grid`.
+- Retired as a plot: the dense Phase 29B hypothesis status table is now `hypothesis_status_report_table.csv`.
+
+Polished output paths:
+
+```text
+data/abm_v4/final/plots_polished/
+data/abm_v4/final/tables_polished/
+data/abm_v4/final/abm_v4_polished_plot_index.csv
+outputs/plots/abm_v4_final_polished/
+```
+
+The visual selection manifest is written to:
+
+```text
+data/abm_v4/final/tables_polished/final_visual_selection_manifest.csv
+```
+
+CLI:
+
+```text
+python scripts/run_abm_v4_base.py --polish-final-abm-v4-plots --create-output-dirs
+```
+
+The final LaTeX report and portfolio webpage remain human-written. Phase 29C only provides polished source tables, figures, copied figure assets, and a selection manifest.
+
+## Phase 29B Narrative-Grade Final Visual Redesign
+
+Phase 29B adds a smaller report-ready visual layer for the completed ABM v4 historical diagnostic framework. It supersedes the first Phase 29A plots for final-report and portfolio use because the Phase 29A figures were useful artifact summaries but too generic: several visualized labels or statuses more than evidence, tradeoffs, and model boundaries.
+
+Phase 29B does not change model logic, create scenarios, implement ABM v5, write LaTeX, or write webpage files. The LaTeX report and portfolio webpage remain human-written; these artifacts are only source figures and source tables.
+
+Narrative plots:
+
+- `abm_v4_architecture_layers`
+- `abm_v4_emissions_decomposition_logic`
+- `abm_v4_two_rule_metric_tradeoff`
+- `abm_v4_mechanism_decision_tree`
+- `abm_v4_capability_source_coverage`
+- `abm_v4_q_energy_mix_quality_boundary`
+- `abm_v4_china_electricity_boundary_case`
+- `abm_v4_scenario_readiness_checklist`
+- `abm_v4_to_v5_roadmap`
+- `abm_v4_hypothesis_status_table`
+
+Narrative source tables:
+
+- `architecture_layers_source.csv`
+- `emissions_decomposition_logic_source.csv`
+- `two_rule_metric_tradeoff_source.csv`
+- `mechanism_decision_tree_source.csv`
+- `capability_source_coverage_source.csv`
+- `q_energy_mix_quality_boundary_source.csv`
+- `china_electricity_boundary_case_source.csv`
+- `scenario_readiness_checklist_source.csv`
+- `abm_v4_to_v5_roadmap_source.csv`
+- `hypothesis_status_table_source.csv`
+
+Output paths:
+
+```text
+data/abm_v4/final/plots_narrative/
+data/abm_v4/final/tables_narrative/
+data/abm_v4/final/abm_v4_narrative_plot_index.csv
+outputs/plots/abm_v4_final_narrative/
+```
+
+CLI:
+
+```text
+python scripts/run_abm_v4_base.py --build-final-abm-v4-narrative-plots --create-output-dirs
+```
+
 ## Implemented in Phase 1
 
 - Created `src/abm_v4/` as a new namespace without modifying ABM v1, v2, or v3.

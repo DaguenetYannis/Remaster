@@ -17,7 +17,11 @@ from src.abm_v4.emissions import (
 )
 from src.abm_v4.paths import ABMV4Paths
 from src.abm_v4.production import ProductionFeasibilityEngine
-from src.abm_v4.reporting import ABMV4FinalArtifactBuilder
+from src.abm_v4.reporting import (
+    ABMV4FinalArtifactBuilder,
+    ABMV4NarrativePlotBuilder,
+    ABMV4PolishedPlotBuilder,
+)
 from src.abm_v4.simulation import (
     MultiYearBaseSimulator,
     inspect_base_model_readiness,
@@ -231,6 +235,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--build-final-abm-v4-plots-tables",
         action="store_true",
         help="Build Phase 29A final ABM v4 plots, clean tables, and artifact index.",
+    )
+    parser.add_argument(
+        "--build-final-abm-v4-narrative-plots",
+        action="store_true",
+        help="Build Phase 29B narrative-grade final ABM v4 plots, source tables, and artifact index.",
+    )
+    parser.add_argument(
+        "--polish-final-abm-v4-plots",
+        action="store_true",
+        help="Build Phase 29C polished final ABM v4 plots, source tables, selection manifest, and artifact index.",
     )
     parser.add_argument("--calibration-random-search-iterations", type=int, default=200)
     parser.add_argument("--calibration-seed", type=int, default=42)
@@ -1080,6 +1094,35 @@ def main() -> None:
         print(f"Final plot files: {len(result.plot_paths)}")
         print(f"Portfolio plot copies: {len(result.copied_plot_paths)}")
         print(f"Artifact index: {result.artifact_index_path}")
+        return
+
+    if args.build_final_abm_v4_narrative_plots:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--build-final-abm-v4-narrative-plots requires --create-output-dirs to write final narrative artifacts."
+            )
+        builder = ABMV4NarrativePlotBuilder(paths)
+        result = builder.run(write_outputs=True)
+        print("Built ABM v4 narrative-grade final plots, source tables, and artifact index.")
+        print(f"Narrative source tables: {len(result.source_table_paths)}")
+        print(f"Narrative plot files: {len(result.plot_paths)}")
+        print(f"Narrative output plot copies: {len(result.copied_plot_paths)}")
+        print(f"Narrative plot index: {result.plot_index_path}")
+        return
+
+    if args.polish_final_abm_v4_plots:
+        if not args.create_output_dirs:
+            raise SystemExit(
+                "--polish-final-abm-v4-plots requires --create-output-dirs to write polished final artifacts."
+            )
+        builder = ABMV4PolishedPlotBuilder(paths)
+        result = builder.run(write_outputs=True)
+        print("Built ABM v4 polished final plots, source tables, selection manifest, and artifact index.")
+        print(f"Polished source tables: {len(result.source_table_paths)}")
+        print(f"Polished plot files: {len(result.plot_paths)}")
+        print(f"Polished output plot copies: {len(result.copied_plot_paths)}")
+        print(f"Polished plot index: {result.plot_index_path}")
+        print(f"Visual selection manifest: {result.manifest_path}")
         return
 
     if args.create_output_dirs:

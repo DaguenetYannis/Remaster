@@ -88,12 +88,36 @@ class ABMV4Paths:
         return self.final / "plots"
 
     @property
+    def final_tables_narrative(self) -> Path:
+        return self.final / "tables_narrative"
+
+    @property
+    def final_plots_narrative(self) -> Path:
+        return self.final / "plots_narrative"
+
+    @property
+    def final_tables_polished(self) -> Path:
+        return self.final / "tables_polished"
+
+    @property
+    def final_plots_polished(self) -> Path:
+        return self.final / "plots_polished"
+
+    @property
     def outputs_root(self) -> Path:
         return self.project_root / "outputs"
 
     @property
     def outputs_plots_abm_v4_final(self) -> Path:
         return self.outputs_root / "plots" / "abm_v4_final"
+
+    @property
+    def outputs_plots_abm_v4_final_narrative(self) -> Path:
+        return self.outputs_root / "plots" / "abm_v4_final_narrative"
+
+    @property
+    def outputs_plots_abm_v4_final_polished(self) -> Path:
+        return self.outputs_root / "plots" / "abm_v4_final_polished"
 
     def final_artifact_directories(self) -> tuple[Path, ...]:
         """Return final ABM v4 artifact directories without creating them."""
@@ -109,9 +133,45 @@ class ABMV4Paths:
         for output_directory in self.final_artifact_directories():
             output_directory.mkdir(parents=True, exist_ok=True)
 
+    def final_narrative_artifact_directories(self) -> tuple[Path, ...]:
+        """Return narrative final artifact directories without creating them."""
+        return (
+            self.final,
+            self.final_tables_narrative,
+            self.final_plots_narrative,
+            self.outputs_plots_abm_v4_final_narrative,
+        )
+
+    def ensure_final_narrative_artifact_directories(self) -> None:
+        """Create only final ABM v4 narrative artifact directories."""
+        for output_directory in self.final_narrative_artifact_directories():
+            output_directory.mkdir(parents=True, exist_ok=True)
+
+    def final_polished_artifact_directories(self) -> tuple[Path, ...]:
+        """Return polished final artifact directories without creating them."""
+        return (
+            self.final,
+            self.final_tables_polished,
+            self.final_plots_polished,
+            self.outputs_plots_abm_v4_final_polished,
+        )
+
+    def ensure_final_polished_artifact_directories(self) -> None:
+        """Create only final ABM v4 polished artifact directories."""
+        for output_directory in self.final_polished_artifact_directories():
+            output_directory.mkdir(parents=True, exist_ok=True)
+
     @property
     def final_artifact_index_path(self) -> Path:
         return self.final / "abm_v4_final_artifact_index.csv"
+
+    @property
+    def final_narrative_plot_index_path(self) -> Path:
+        return self.final / "abm_v4_narrative_plot_index.csv"
+
+    @property
+    def final_polished_plot_index_path(self) -> Path:
+        return self.final / "abm_v4_polished_plot_index.csv"
 
     def ensure_output_directories(self) -> None:
         """Create only ABM v4 output directories."""
