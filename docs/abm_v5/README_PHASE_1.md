@@ -70,3 +70,10 @@ scenario-restrained complexity model.
 
 This phase does not implement empirical loading, model dynamics, regime
 discovery, scenarios, or plotting.
+
+## Phase 2 Started
+
+Phase 2.1 starts the empirical historical-backbone work by adding a metadata-only
+source inventory and input registry. It audits required Eora and Atlas inputs and
+optional ABM v3/v4 construction references, but still does not load, transform,
+simulate, discover regimes, or run scenarios.
